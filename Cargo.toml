@@ -1,5 +1,5 @@
 [package]
-name = "lsagent_manager"
+name = "agent_manip"
 version = "0.1.0"
 edition = "2021"
 
