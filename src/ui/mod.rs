@@ -3,7 +3,6 @@ use crate::db::Database;
 use crate::error::{LogManagerError, validate_log_path};
 use crate::log_reader::{LogReader, LogEntry};
 use std::sync::{Arc, Mutex};
-use anyhow::Result;
 use std::time::Duration;
 #[derive(Default)]
 pub struct FileLoadStatus {
@@ -22,6 +21,8 @@ pub enum StatusLevel {
 }
 
 pub struct AgentManagerApp {
+    // TODO: This field will be used for database operations in future implementations
+    // Keep it for now as it's part of the core functionality
     db: Arc<Mutex<Database>>,
     log_reader: Arc<Mutex<LogReader>>,
     log_entries: Vec<LogEntry>,
@@ -30,6 +31,7 @@ pub struct AgentManagerApp {
     log_path_input: String,
     file_load_status: FileLoadStatus,
     status_timeout: Duration,
+    last_update: std::time::Instant,
 }
 
 #[derive(PartialEq)]
@@ -50,21 +52,22 @@ impl AgentManagerApp {
             log_path_input: String::new(),
             file_load_status: FileLoadStatus::default(),
             status_timeout: Duration::from_secs(5),
+            last_update: std::time::Instant::now(),
         }
     }
 
-    pub fn update_logs(&mut self) -> Result<()> {
-        if let Ok(mut reader) = self.log_reader.lock() {
-            self.log_entries = reader.read_latest_entries(100)?;
+    /// Updates the log entries from the log reader
+    pub fn update_logs(&mut self) {
+        if let Ok(reader) = self.log_reader.lock() {
+            self.log_entries = reader.read_latest_entries(100);
         }
-        Ok(())
     }
 
     fn update_log_file(&mut self, new_path: &str) {
         // Validate the new path
         if let Err(e) = validate_log_path(new_path) {
             self.file_load_status = FileLoadStatus {
-                message: format!("Failed to update log file path: {}", e),
+                message: format!("Failed to update log file path: {e}"),
                 level: StatusLevel::Error,
                 timestamp: Some(std::time::Instant::now()),
             };
@@ -74,37 +77,37 @@ impl AgentManagerApp {
         let result = match self.log_reader.lock() {
             Ok(mut reader) => reader.change_log_path(new_path),
             Err(e) => Err(LogManagerError::ReadError(
-                format!("Failed to update log file path to {}: {}", new_path, e)
+                format!("Failed to update log file path to {new_path}: {e}")
             ).into()),
         };
 
         match result {
-            Ok(_) => {
+            Ok(()) => {
                 self.file_load_status = FileLoadStatus {
-                    message: format!("Successfully loaded log file: {}", new_path),
+                    message: format!("Successfully loaded log file: {new_path}"),
                     level: StatusLevel::Success,
                     timestamp: Some(std::time::Instant::now()),
                 };
                 self.log_path = new_path.to_string();
                 // Refresh log entries
-                let _ = self.update_logs();
+                let () = self.update_logs();
             }
             Err(e) => {
                 let (message, level) = match e.downcast_ref::<LogManagerError>() {
                     Some(LogManagerError::FileNotFound(path)) => (
-                        format!("Log file not found: {}", path),
+                        format!("Log file not found: {path}"),
                         StatusLevel::Error
                     ),
                     Some(LogManagerError::PermissionDenied(path)) => (
-                        format!("Permission denied for file: {}", path),
+                        format!("Permission denied for file: {path}"),
                         StatusLevel::Error
                     ),
                     Some(LogManagerError::InvalidPath(path)) => (
-                        format!("Invalid file path: {}", path),
+                        format!("Invalid file path: {path}"),
                         StatusLevel::Warning
                     ),
                     _ => (
-                        format!("Failed to load log file: {}", e),
+                        format!("Failed to load log file: {e}"),
                         StatusLevel::Error
                     ),
                 };
@@ -178,8 +181,16 @@ impl AgentManagerApp {
 
         self.render_file_load_status(ui);
 
+        // Update logs every 5 seconds
+        let now = std::time::Instant::now();
+        if now.duration_since(self.last_update) >= Duration::from_secs(5) {
+            self.update_logs();
+            self.last_update = now;
+        }
+
+        // Update logs when the button is clicked
         if ui.button("Refresh").clicked() {
-            let _ = self.update_logs();
+            self.update_logs();
         }
 
         egui::ScrollArea::vertical().show(ui, |ui| {
@@ -194,11 +205,17 @@ impl AgentManagerApp {
     }
 
     fn render_database_tab(&self, ui: &mut egui::Ui) {
+        // TODO: Will use self.db for database operations in future implementation
+        // Use self to get rid of the warning
+        let _ = self.db;
         ui.heading("Database Management");
         // Add database management UI here
     }
 
     fn render_settings_tab(&self, ui: &mut egui::Ui) {
+        // TODO: Will use instance data for settings in future implementation
+        // Use self to get rid of the warning
+        let _ = self;
         ui.heading("Settings");
         // Add settings UI here
     }

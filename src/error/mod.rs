@@ -20,11 +20,11 @@ pub enum LogManagerError {
     #[error("Log file not found: {0}")]
     FileNotFound(String),
 
-    #[error("Invalid log entry format at line {line}: {details}")]
+    #[error("Parse error: {message}{}", .line.map(|l| format!(" at line {l}")).unwrap_or_default())]
     ParseError {
-        line: usize,
-        details: String,
-    }
+        message: String,
+        line: Option<usize>,
+    },
 }
 
 pub fn validate_log_path(path: &str) -> Result<(), LogManagerError> {

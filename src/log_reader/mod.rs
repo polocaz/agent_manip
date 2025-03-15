@@ -1,4 +1,5 @@
 use anyhow::Result;
+use crate::error::LogManagerError;
 use chrono::{DateTime, Local};
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader};
@@ -42,45 +43,51 @@ impl LogReader {
         })
     }
 
-    pub fn read_latest_entries(&mut self, count: usize) -> Result<Vec<LogEntry>> {
-        let mut entries = Vec::new();
-        let reader = BufReader::new(&self.file);
-        
-        // Read all lines and keep only the last 'count' entries
-        let lines: Vec<String> = reader.lines()
-            .filter_map(|line| line.ok())
-            .collect();
+    pub fn read_latest_entries(&self, count: usize) -> Vec<LogEntry> {
+        File::open(&self.path).map_or_else(|_| Vec::new(), |file| {
+            let lines: Vec<_> = BufReader::new(file)
+                .lines()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap_or_default();
 
-        for line in lines.iter().rev().take(count) {
-            if let Some(entry) = self.parse_log_line(line) {
-                entries.push(entry);
-            }
-        }
-
-        entries.reverse();
-        Ok(entries)
+            lines.iter()
+                .rev()
+                .take(count)
+                .enumerate()
+                .filter_map(|(line_num, line)| {
+                    match Self::parse_log_line(line, Some(line_num + 1)) {
+                        Ok(entry) => Some(entry),
+                        Err(LogManagerError::ParseError { message, .. }) => {
+                            eprintln!("Parse error at line {}: {}", line_num + 1, message);
+                            None
+                        }
+                        Err(_) => None,
+                    }
+                })
+                .collect()
+        })
     }
 
-    fn parse_log_line(&self, line: &str) -> Option<LogEntry> {
-        // This is a basic implementation - adjust based on your log format
+    fn parse_log_line(line: &str, line_num: Option<usize>) -> Result<LogEntry, LogManagerError> {
         let parts: Vec<&str> = line.splitn(3, ' ').collect();
-        if parts.len() < 3 {
-            return None;
+        
+        if parts.len() != 3 {
+            return Err(LogManagerError::ParseError {
+                message: "Invalid log entry format: expected 3 parts (timestamp, level, message)".to_string(),
+                line: line_num,
+            });
         }
 
-        if let Ok(timestamp) = DateTime::parse_from_rfc3339(parts[0]) {
-            Some(LogEntry {
+        DateTime::parse_from_rfc3339(parts[0])
+            .map_err(|e| LogManagerError::ParseError {
+                message: format!("Invalid timestamp format: {e}"),
+                line: line_num,
+            })
+            .map(|timestamp| LogEntry {
                 timestamp: timestamp.into(),
                 level: parts[1].to_string(),
                 message: parts[2].to_string(),
             })
-        } else {
-            None
-        }
-    }
-
-    pub fn get_path(&self) -> &str {
-        &self.path
     }
 
 }
@@ -103,7 +110,7 @@ mod tests {
         writeln!(file, "2024-02-20T10:01:00Z ERROR Test message 2").unwrap();
         
         let mut reader = LogReader::new(log_path).unwrap();
-        let entries = reader.read_latest_entries(2).unwrap();
+        let entries = reader.read_latest_entries(2);
         
         assert_eq!(entries.len(), 2);
     }

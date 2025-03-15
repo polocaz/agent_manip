@@ -26,10 +26,6 @@ impl Database {
         )?;
         Ok(())
     }
-
-    pub fn get_connection(&self) -> &Connection {
-        &self.conn
-    }
 }
 
 #[cfg(test)]
