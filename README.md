@@ -1,18 +1,26 @@
-# LSAgent Manager
+# Agent_Manip
 
-A Rust-based GUI application for managing and monitoring the LSAgent daemon program. This application provides a user-friendly interface for:
+A Rust-based GUI application for managing and monitoring the agent. Main goal is to provide a similar experience to the current utils SystrackSQL and LogView but for MacOS and Linux. Compatability with windows would be a plus but not the main goal.
 
-- Reading and monitoring log files (lsaigent1.log)
-- Interacting with the SQLite database
-- Managing agent settings and configuration
-
-## Features
+## Planned features
 
 - Real-time log monitoring with automatic updates
-- Database management interface
-- Clean and modern UI built with egui
+- Database management
+  - Basic ops like reads and writes
+  - Automatic string id mapping
 - Efficient log file parsing and display
-- SQLite database integration
+- Status monitoring of the agent
+- Agent controls
+  - Start
+  - Stop
+  - Read config
+  - Inventory
+  - Condense
+- Agent statistics at a glance
+  - avg cpu in past x time
+  - Errors in past x time
+  - iops 
+- Configuration monitoring and overriding
 
 ## Prerequisites
 
@@ -24,7 +32,7 @@ A Rust-based GUI application for managing and monitoring the LSAgent daemon prog
 1. Clone the repository:
 ```bash
 git clone <repository-url>
-cd lsagent_manager
+cd agent_manip
 ```
 
 2. Build the application:
@@ -32,22 +40,21 @@ cd lsagent_manager
 cargo build --release
 ```
 
-The compiled binary will be available in `target/release/lsagent_manager`
+The compiled binary will be available in `target/release/agent_manip`
 
 ## Usage
 
-1. Make sure you have the following files in your working directory:
-   - `lsaigent1.log` - The log file to monitor
-   - `agent.db` - The SQLite database file (will be created if it doesn't exist)
-
-2. Run the application:
+1. Run the application:
 ```bash
-./target/release/lsagent_manager
+./target/release/agent_manip
 ```
+2. The application will point to the default locations of agent files, but they can be chosen via file picker
+  a. TODO: Load file paths from 
 
 ## Development
 
-- The application is structured into three main modules:
+- The application is structured into four main modules:
+  - `agent_monitor` : Agent service interaction
   - `db`: Database interaction layer
   - `log_reader`: Log file parsing and monitoring
   - `ui`: User interface components

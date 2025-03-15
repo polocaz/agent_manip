@@ -163,6 +163,17 @@ impl AgentManagerApp {
                 let path = self.log_path_input.clone();
                 self.update_log_file(&path);
             }
+
+            // Browse button
+            if ui.button("Browse").clicked() {
+                if let Some(path) = rfd::FileDialog::new()
+                    .add_filter("Log files", &["log"])
+                    .set_directory("./")
+                    .pick_file() 
+                {
+                    self.log_path_input = path.display().to_string();
+                }
+            }
         });
 
         self.render_file_load_status(ui);
