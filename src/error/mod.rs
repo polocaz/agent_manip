@@ -1,4 +1,5 @@
 use thiserror::Error;
+use chrono::ParseError;
 
 #[derive(Error, Debug)]
 pub enum LogManagerError {
@@ -25,6 +26,15 @@ pub enum LogManagerError {
         message: String,
         line: Option<usize>,
     },
+}
+
+impl From<ParseError> for LogManagerError {
+    fn from(err: ParseError) -> Self {
+        LogManagerError::ParseError {
+            message: err.to_string(),
+            line: None,
+        }
+    }
 }
 
 pub fn validate_log_path(path: &str) -> Result<(), LogManagerError> {

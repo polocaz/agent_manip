@@ -1,7 +1,7 @@
-use eframe::egui;
+use eframe::egui::{self, Layout, ScrollArea, Grid};
 use crate::db::Database;
 use crate::error::{LogManagerError, validate_log_path};
-use crate::log_reader::{LogReader, LogEntry};
+use crate::log_reader::{LogReader, LogEntry, LogLevel};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 #[derive(Default)]
@@ -152,13 +152,7 @@ impl AgentManagerApp {
     fn render_logs_tab(&mut self, ui: &mut egui::Ui) {
         ui.heading("Log Viewer");
         
-        // TODO: Add filter by level
-        // ui.horizontal(|ui| {
-        //     ui.label("Filter by level:");
-        //     ui.combo_box_with_label(&mut self.filter_level, &["All", "Debug", "Info", "Warn", "Error"]);
-        // });
-
-        // File choice/loading
+        // File controls in top panel
         ui.horizontal(|ui| {
             ui.label("File:");
             ui.text_edit_singleline(&mut self.log_path_input);
@@ -167,7 +161,6 @@ impl AgentManagerApp {
                 self.update_log_file(&path);
             }
 
-            // Browse button
             if ui.button("Browse").clicked() {
                 if let Some(path) = rfd::FileDialog::new()
                     .add_filter("Log files", &["log"])
@@ -181,27 +174,103 @@ impl AgentManagerApp {
 
         self.render_file_load_status(ui);
 
-        // Update logs every 5 seconds
+        // Auto-update and manual refresh controls
         let now = std::time::Instant::now();
         if now.duration_since(self.last_update) >= Duration::from_secs(5) {
             self.update_logs();
             self.last_update = now;
         }
 
-        // Update logs when the button is clicked
         if ui.button("Refresh").clicked() {
             self.update_logs();
         }
 
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            for entry in &self.log_entries {
-                ui.horizontal(|ui| {
-                    ui.label(entry.timestamp.format("%Y-%m-%d %H:%M:%S").to_string());
-                    ui.label(&entry.level);
-                    ui.label(&entry.message);
-                });
-            }
-        });
+        // Create scrollable area that fills available space
+        ScrollArea::vertical()
+            .auto_shrink([false; 2])
+            .show(ui, |ui| {
+                Grid::new("log_grid")
+                    .striped(true)
+                    .spacing([2.0, 2.0])
+                    .min_col_width(50.0)
+                    .show(ui, |ui| {
+                        // Headers
+                        ui.style_mut().spacing.item_spacing.x = 10.0;
+                        
+                        ui.scope(|ui| {
+                            ui.set_min_width(160.0);
+                            ui.strong("Timestamp");
+                        });
+                        
+                        ui.scope(|ui| {
+                            ui.set_min_width(100.0);
+                            ui.strong("Component");
+                        });
+                        
+                        ui.scope(|ui| {
+                            ui.set_min_width(50.0);
+                            ui.strong("Thread");
+                        });
+                        
+                        ui.scope(|ui| {
+                            ui.set_min_width(50.0);
+                            ui.strong("Level");
+                        });
+                        
+                        ui.scope(|ui| {
+                            ui.set_min_width(80.0);
+                            ui.strong("Category");
+                        });
+                        
+                        ui.scope(|ui| {
+                            ui.set_min_width(200.0);
+                            ui.strong("Message");
+                        });
+                        
+                        ui.end_row();
+
+                        // Log entries
+                        for entry in &self.log_entries {
+                            ui.scope(|ui| {
+                                ui.set_min_width(160.0);
+                                ui.label(entry.timestamp.format("%Y-%m-%d %H:%M:%S").to_string());
+                            });
+                            
+                            ui.scope(|ui| {
+                                ui.set_min_width(100.0);
+                                ui.label(&entry.component);
+                            });
+                            
+                            ui.scope(|ui| {
+                                ui.set_min_width(50.0);
+                                ui.label(format!("({})", entry.line_number));
+                            });
+                            
+                            ui.scope(|ui| {
+                                ui.set_min_width(50.0);
+                                let level_text = match entry.level {
+                                    LogLevel::Info => egui::RichText::new("Info").color(egui::Color32::from_rgb(100, 200, 100)),
+                                    LogLevel::Warning => egui::RichText::new("Warn").color(egui::Color32::YELLOW),
+                                    LogLevel::Error => egui::RichText::new("Error").color(egui::Color32::RED),
+                                    _ => egui::RichText::new(entry.level.to_string()),
+                                };
+                                ui.label(level_text);
+                            });
+                            
+                            ui.scope(|ui| {
+                                ui.set_min_width(80.0);
+                                ui.label(&entry.category);
+                            });
+                            
+                            ui.scope(|ui| {
+                                ui.set_min_width(200.0);
+                                ui.label(&entry.message);
+                            });
+                            
+                            ui.end_row();
+                        }
+                    });
+            });
     }
 
     fn render_database_tab(&self, ui: &mut egui::Ui) {

@@ -1,20 +1,51 @@
 use anyhow::Result;
 use crate::error::LogManagerError;
-use chrono::{DateTime, Local};
+use chrono::{DateTime, Local, Datelike, NaiveDateTime, TimeZone};
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
 // Log entry struct TODO: add thread name
+#[derive(Debug, Clone)]
 pub struct LogEntry {
     pub timestamp: DateTime<Local>,
+    pub component: String,
     pub message: String,
-    pub level: String,
+    pub level: LogLevel,
+    pub line_number: usize,
+    pub category: String,
 }
 
 pub struct LogReader {
     file: File,
     path: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum LogLevel {
+    Info, 
+    Warning,
+    Error,
+    One,
+    Two,
+    Three,
+    Four,
+    Five,
+}
+
+impl std::fmt::Display for LogLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LogLevel::Info => write!(f, "Info"),
+            LogLevel::Warning => write!(f, "Warning"),
+            LogLevel::Error => write!(f, "Error"),
+            LogLevel::One => write!(f, "-1"),
+            LogLevel::Two => write!(f, "-2"),
+            LogLevel::Three => write!(f, "-3"),
+            LogLevel::Four => write!(f, "-4"),
+            LogLevel::Five => write!(f, "-5"),
+        }
+    }
 }
 
 impl LogReader {
@@ -69,25 +100,72 @@ impl LogReader {
     }
 
     fn parse_log_line(line: &str, line_num: Option<usize>) -> Result<LogEntry, LogManagerError> {
-        let parts: Vec<&str> = line.splitn(3, ' ').collect();
+        let parts: Vec<&str> = line.split_whitespace().collect();
         
-        if parts.len() != 3 {
+        if parts.len() < 6 {
             return Err(LogManagerError::ParseError {
-                message: "Invalid log entry format: expected 3 parts (timestamp, level, message)".to_string(),
+                message: "Invalid log entry format".to_string(),
                 line: line_num,
             });
         }
 
-        DateTime::parse_from_rfc3339(parts[0])
-            .map_err(|e| LogManagerError::ParseError {
-                message: format!("Invalid timestamp format: {e}"),
+        // Parse date and time (03-14 18:31:38)
+        let date = parts[0];
+        let time = parts[1];
+        let current_year = Local::now().year();
+        let timestamp_str = format!("{}-{} {}", current_year, date, time);
+        let naive_dt = NaiveDateTime::parse_from_str(&timestamp_str, "%Y-%m-%d %H:%M:%S")?;
+        let timestamp = Local.from_local_datetime(&naive_dt)
+            .single()
+            .ok_or_else(|| LogManagerError::ParseError {
+                message: "Invalid timestamp".to_string(),
                 line: line_num,
+            })?;
+
+        // Parse component and line number (collThermalsNix(31))
+        let component_line = parts[2];
+        let (component, line_number) = component_line
+            .split_once('(')
+            .and_then(|(comp, id)| {
+                id.trim_end_matches(')')
+                    .parse::<u32>()
+                    .ok()
+                    .map(|num| (comp.to_string(), num))
             })
-            .map(|timestamp| LogEntry {
-                timestamp: timestamp.into(),
-                level: parts[1].to_string(),
-                message: parts[2].to_string(),
-            })
+            .ok_or_else(|| LogManagerError::ParseError {
+                message: "Invalid component/thread format".to_string(),
+                line: line_num,
+            })?;
+
+        // Parse log level (-I or -W)
+        let level = match parts[3] {
+            "-I" => LogLevel::Info,
+            "-W" => LogLevel::Warning,
+            "-E" => LogLevel::Error,
+            "-1" => LogLevel::One,
+            "-2" => LogLevel::Two,
+            "-3" => LogLevel::Three,
+            "-4" => LogLevel::Four,
+            "-5" => LogLevel::Five,
+            level => return Err(LogManagerError::ParseError {
+                message: format!("Unknown log level: {}", level),
+                line: line_num,
+            }),
+        };
+
+        // Get category and message
+        // let category = parts[4].to_string();
+        let category = "".to_string(); // TODO: add category
+        let message = parts[4..].join(" ");
+
+        Ok(LogEntry {
+            timestamp,
+            component,
+            message,
+            level,
+            line_number: line_num.unwrap_or(0),
+            category,
+        })
     }
 
 }
