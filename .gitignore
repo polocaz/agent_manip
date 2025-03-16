@@ -17,4 +17,5 @@ Cargo.lock
 *.log
 *.sqlite3
 *.db
+*.cfg
 .env 

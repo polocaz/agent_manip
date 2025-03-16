@@ -1,7 +1,7 @@
-use eframe::egui::{self, Layout, ScrollArea, Grid};
 use crate::db::Database;
-use crate::error::{LogManagerError, validate_log_path};
-use crate::log_reader::{LogReader, LogEntry, LogLevel};
+use crate::error::{validate_log_path, LogManagerError};
+use crate::log_reader::{LogEntry, LogLevel, LogReader};
+use eframe::egui::{self, Grid, Layout, ScrollArea};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 #[derive(Default)]
@@ -76,9 +76,10 @@ impl AgentManagerApp {
 
         let result = match self.log_reader.lock() {
             Ok(mut reader) => reader.change_log_path(new_path),
-            Err(e) => Err(LogManagerError::ReadError(
-                format!("Failed to update log file path to {new_path}: {e}")
-            ).into()),
+            Err(e) => Err(LogManagerError::ReadError(format!(
+                "Failed to update log file path to {new_path}: {e}"
+            ))
+            .into()),
         };
 
         match result {
@@ -94,22 +95,17 @@ impl AgentManagerApp {
             }
             Err(e) => {
                 let (message, level) = match e.downcast_ref::<LogManagerError>() {
-                    Some(LogManagerError::FileNotFound(path)) => (
-                        format!("Log file not found: {path}"),
-                        StatusLevel::Error
-                    ),
+                    Some(LogManagerError::FileNotFound(path)) => {
+                        (format!("Log file not found: {path}"), StatusLevel::Error)
+                    }
                     Some(LogManagerError::PermissionDenied(path)) => (
                         format!("Permission denied for file: {path}"),
-                        StatusLevel::Error
+                        StatusLevel::Error,
                     ),
-                    Some(LogManagerError::InvalidPath(path)) => (
-                        format!("Invalid file path: {path}"),
-                        StatusLevel::Warning
-                    ),
-                    _ => (
-                        format!("Failed to load log file: {e}"),
-                        StatusLevel::Error
-                    ),
+                    Some(LogManagerError::InvalidPath(path)) => {
+                        (format!("Invalid file path: {path}"), StatusLevel::Warning)
+                    }
+                    _ => (format!("Failed to load log file: {e}"), StatusLevel::Error),
                 };
 
                 self.file_load_status = FileLoadStatus {
@@ -138,12 +134,10 @@ impl eframe::App for AgentManagerApp {
             });
         });
 
-        egui::CentralPanel::default().show(ctx, |ui| {
-            match self.selected_tab {
-                Tab::Logs => self.render_logs_tab(ui),
-                Tab::Database => self.render_database_tab(ui),
-                Tab::Settings => self.render_settings_tab(ui),
-            }
+        egui::CentralPanel::default().show(ctx, |ui| match self.selected_tab {
+            Tab::Logs => self.render_logs_tab(ui),
+            Tab::Database => self.render_database_tab(ui),
+            Tab::Settings => self.render_settings_tab(ui),
         });
     }
 }
@@ -151,7 +145,7 @@ impl eframe::App for AgentManagerApp {
 impl AgentManagerApp {
     fn render_logs_tab(&mut self, ui: &mut egui::Ui) {
         ui.heading("Log Viewer");
-        
+
         // File controls in top panel
         ui.horizontal(|ui| {
             ui.label("File:");
@@ -165,7 +159,7 @@ impl AgentManagerApp {
                 if let Some(path) = rfd::FileDialog::new()
                     .add_filter("Log files", &["log"])
                     .set_directory("./")
-                    .pick_file() 
+                    .pick_file()
                 {
                     self.log_path_input = path.display().to_string();
                 }
@@ -196,37 +190,37 @@ impl AgentManagerApp {
                     .show(ui, |ui| {
                         // Headers
                         ui.style_mut().spacing.item_spacing.x = 10.0;
-                        
+
                         ui.scope(|ui| {
                             ui.set_min_width(160.0);
                             ui.strong("Timestamp");
                         });
-                        
+
                         ui.scope(|ui| {
                             ui.set_min_width(100.0);
                             ui.strong("Component");
                         });
-                        
+
                         ui.scope(|ui| {
                             ui.set_min_width(50.0);
-                            ui.strong("Thread");
+                            ui.strong("Line");
                         });
-                        
+
                         ui.scope(|ui| {
                             ui.set_min_width(50.0);
                             ui.strong("Level");
                         });
-                        
+
                         ui.scope(|ui| {
                             ui.set_min_width(80.0);
-                            ui.strong("Category");
+                            ui.strong("Thread Name");
                         });
-                        
+
                         ui.scope(|ui| {
                             ui.set_min_width(200.0);
                             ui.strong("Message");
                         });
-                        
+
                         ui.end_row();
 
                         // Log entries
@@ -235,38 +229,43 @@ impl AgentManagerApp {
                                 ui.set_min_width(160.0);
                                 ui.label(entry.timestamp.format("%Y-%m-%d %H:%M:%S").to_string());
                             });
-                            
+
                             ui.scope(|ui| {
                                 ui.set_min_width(100.0);
                                 ui.label(&entry.component);
                             });
-                            
+
                             ui.scope(|ui| {
                                 ui.set_min_width(50.0);
                                 ui.label(format!("({})", entry.line_number));
                             });
-                            
+
                             ui.scope(|ui| {
                                 ui.set_min_width(50.0);
                                 let level_text = match entry.level {
-                                    LogLevel::Info => egui::RichText::new("Info").color(egui::Color32::from_rgb(100, 200, 100)),
-                                    LogLevel::Warning => egui::RichText::new("Warn").color(egui::Color32::YELLOW),
-                                    LogLevel::Error => egui::RichText::new("Error").color(egui::Color32::RED),
+                                    LogLevel::Info => egui::RichText::new("Info")
+                                        .color(egui::Color32::from_rgb(100, 200, 100)),
+                                    LogLevel::Warning => {
+                                        egui::RichText::new("Warn").color(egui::Color32::YELLOW)
+                                    }
+                                    LogLevel::Error => {
+                                        egui::RichText::new("Error").color(egui::Color32::RED)
+                                    }
                                     _ => egui::RichText::new(entry.level.to_string()),
                                 };
                                 ui.label(level_text);
                             });
-                            
+
                             ui.scope(|ui| {
                                 ui.set_min_width(80.0);
-                                ui.label(&entry.category);
+                                ui.label(&entry.thread_name);
                             });
-                            
+
                             ui.scope(|ui| {
                                 ui.set_min_width(200.0);
                                 ui.label(&entry.message);
                             });
-                            
+
                             ui.end_row();
                         }
                     });
@@ -306,4 +305,4 @@ impl AgentManagerApp {
             }
         }
     }
-} 
+}

@@ -4,7 +4,7 @@ mod log_reader;
 mod ui;
 
 use anyhow::Result;
-use eframe::{NativeOptions, run_native};
+use eframe::{run_native, NativeOptions};
 use egui::ViewportBuilder;
 use std::path::PathBuf;
 use std::io::Write;
@@ -44,8 +44,7 @@ fn main() -> Result<()> {
 
     // Create the eframe application
     let options = NativeOptions {
-        viewport: ViewportBuilder::default()
-            .with_inner_size([800.0, 600.0]),
+        viewport: ViewportBuilder::default().with_inner_size([800.0, 600.0]),
         ..Default::default()
     };
 
@@ -53,8 +52,9 @@ fn main() -> Result<()> {
     run_native(
         "LsiAgent Manager",
         options,
-        Box::new(|_cc| Box::new(ui::AgentManagerApp::new(database, log_reader))),
-    ).map_err(|e| anyhow::anyhow!("Failed to run application: {}", e))?;
+        Box::new(|_cc| Ok(Box::new(ui::AgentManagerApp::new(database, log_reader)))),
+    )
+    .map_err(|e| anyhow::anyhow!("Failed to run application: {}", e))?;
 
     Ok(())
-} 
+}
