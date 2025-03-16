@@ -24,14 +24,15 @@ pub struct AgentManagerApp {
     // TODO: This field will be used for database operations in future implementations
     // Keep it for now as it's part of the core functionality
     db: Arc<Mutex<Database>>,
-    log_reader: Arc<Mutex<LogReader>>,
-    log_entries: Vec<LogEntry>,
     selected_tab: Tab,
+    last_update: std::time::Instant,
+    log_entries: Vec<LogEntry>,
+    log_order_earliest: bool,
+    log_reader: Arc<Mutex<LogReader>>,
     log_path: String,
     log_path_input: String,
     file_load_status: FileLoadStatus,
     status_timeout: Duration,
-    last_update: std::time::Instant,
 }
 
 #[derive(PartialEq)]
@@ -53,13 +54,24 @@ impl AgentManagerApp {
             file_load_status: FileLoadStatus::default(),
             status_timeout: Duration::from_secs(5),
             last_update: std::time::Instant::now(),
+            log_order_earliest: true,
         }
     }
 
     /// Updates the log entries from the log reader
     pub fn update_logs(&mut self) {
         if let Ok(reader) = self.log_reader.lock() {
-            self.log_entries = reader.read_latest_entries(100);
+            self.log_entries = reader.read_latest_entries(10000, self.log_order_earliest);
+        }
+    }
+
+    fn sort_log_lines_by_time(&mut self, rev_order: bool) {
+        if rev_order {
+            self.log_entries
+                .sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        } else {
+            self.log_entries
+                .sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
         }
     }
 
@@ -177,6 +189,11 @@ impl AgentManagerApp {
 
         if ui.button("Refresh").clicked() {
             self.update_logs();
+        }
+
+        if ui.button("Flip order").clicked() {
+            self.log_order_earliest = !self.log_order_earliest;
+            self.sort_log_lines_by_time(self.log_order_earliest);
         }
 
         // Create scrollable area that fills available space

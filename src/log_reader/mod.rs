@@ -69,7 +69,7 @@ impl LogReader {
         })
     }
 
-    pub fn read_latest_entries(&self, count: usize) -> Vec<LogEntry> {
+    pub fn read_latest_entries(&self, count: usize, earliest_first: bool) -> Vec<LogEntry> {
         File::open(&self.path).map_or_else(
             |_| Vec::new(),
             |file| {
@@ -78,10 +78,9 @@ impl LogReader {
                     .collect::<Result<Vec<_>, _>>()
                     .unwrap_or_default();
 
-                lines
+                // Collect log entries in the order they are read
+                let entries: Vec<LogEntry> = lines
                     .iter()
-                    .rev()
-                    .take(count)
                     .enumerate()
                     .filter_map(|(line_num, line)| {
                         match Self::parse_log_line(line, Some(line_num + 1)) {
@@ -93,7 +92,16 @@ impl LogReader {
                             Err(_) => None,
                         }
                     })
-                    .collect()
+                    .collect();
+
+                // Determine the slice to return based on earliest_first
+                if earliest_first {
+                    // Return the first `count` entries as they are read
+                    entries.into_iter().take(count).collect()
+                } else {
+                    // Return the last `count` entries as they are read
+                    entries.into_iter().rev().take(count).collect()
+                }
             },
         )
     }
@@ -101,7 +109,7 @@ impl LogReader {
     fn parse_log_line(line: &str, line_num: Option<usize>) -> Result<LogEntry, LogManagerError> {
         let parts: Vec<&str> = line.split_whitespace().collect();
 
-        if parts.len() < 6 {
+        if parts.len() < 5 {
             return Err(LogManagerError::ParseError {
                 message: "Invalid log entry format".to_string(),
                 line: line_num,
