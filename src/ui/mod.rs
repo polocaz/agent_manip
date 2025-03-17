@@ -21,18 +21,22 @@ pub enum StatusLevel {
 }
 
 pub struct AgentManagerApp {
+    auto_scroll: bool,
+    auto_update: bool,
+    auto_update_interval: u32,
     // TODO: This field will be used for database operations in future implementations
     // Keep it for now as it's part of the core functionality
     db: Arc<Mutex<Database>>,
     selected_tab: Tab,
     last_update: std::time::Instant,
-    log_entries: Vec<LogEntry>,
+    log_entries: Vec<String>,
     log_order_earliest: bool,
     log_reader: Arc<Mutex<LogReader>>,
     log_path: String,
     log_path_input: String,
     file_load_status: FileLoadStatus,
     status_timeout: Duration,
+    search_query: String,
 }
 
 #[derive(PartialEq)]
@@ -45,34 +49,58 @@ enum Tab {
 impl AgentManagerApp {
     pub fn new(db: Database, log_reader: LogReader) -> Self {
         Self {
+            auto_scroll: false,
+            auto_update: true,
+            auto_update_interval: 5,
             db: Arc::new(Mutex::new(db)),
-            log_reader: Arc::new(Mutex::new(log_reader)),
+            last_update: std::time::Instant::now(),
             log_entries: Vec::new(),
-            selected_tab: Tab::Logs,
+            log_reader: Arc::new(Mutex::new(log_reader)),
+            log_order_earliest: true,
             log_path: String::new(),
             log_path_input: String::new(),
             file_load_status: FileLoadStatus::default(),
+            search_query: String::new(),
+            selected_tab: Tab::Logs,
             status_timeout: Duration::from_secs(5),
-            last_update: std::time::Instant::now(),
-            log_order_earliest: true,
         }
     }
 
-    /// Updates the log entries from the log reader
+    /// Appends new log entries to the existing ones   
     pub fn update_logs(&mut self) {
-        if let Ok(reader) = self.log_reader.lock() {
+        if let Ok(mut reader) = self.log_reader.lock() {
+            let new_entries = reader.read_new_entries();
+
+            if !new_entries.is_empty() {
+                if self.log_order_earliest {
+                    // If showing earliest first, append to the end
+                    self.log_entries.extend(new_entries);
+                } else {
+                    // If showing latest first, prepend to the beginning
+                    let mut new_entries = new_entries;
+                    new_entries.reverse(); // Reverse so newest are first
+                    new_entries.extend(self.log_entries.drain(..));
+                    self.log_entries = new_entries;
+                }
+            }
+        }
+    }
+
+    /// Reloads all log entries (used when changing file or order)
+    pub fn reload_logs(&mut self) {
+        if let Ok(mut reader) = self.log_reader.lock() {
+            // Reset the reader's line counter
+            reader.last_line_read = 0;
+
+            // Load all entries fresh
             self.log_entries = reader.read_latest_entries(10000, self.log_order_earliest);
         }
     }
 
-    fn sort_log_lines_by_time(&mut self, rev_order: bool) {
-        if rev_order {
-            self.log_entries
-                .sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-        } else {
-            self.log_entries
-                .sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
-        }
+    fn flip_log_lines(&mut self) {
+        self.log_order_earliest = !self.log_order_earliest;
+        // Need to reload all logs when flipping order
+        self.reload_logs();
     }
 
     fn update_log_file(&mut self, new_path: &str) {
@@ -156,6 +184,9 @@ impl eframe::App for AgentManagerApp {
 
 impl AgentManagerApp {
     fn render_logs_tab(&mut self, ui: &mut egui::Ui) {
+        // Debug log to show that auto-scroll is working
+        println!("Auto-scroll: {0}", self.auto_scroll);
+
         ui.heading("Log Viewer");
 
         // File controls in top panel
@@ -176,117 +207,74 @@ impl AgentManagerApp {
                     self.log_path_input = path.display().to_string();
                 }
             }
+
+            if ui.button("Refresh").clicked() {
+                self.reload_logs();
+            }
+
+            if ui.button("Flip order").clicked() {
+                self.flip_log_lines();
+            }
+
+            // Add auto-scroll toggle
+            ui.checkbox(&mut self.auto_scroll, "Auto-scroll");
+
+            // Add auto-update interval slider
+            ui.add(
+                egui::Slider::new(&mut self.auto_update_interval, 1..=60)
+                    .text("Update interval (s)"),
+            );
+
+            // Add auto-update toggle
+            ui.checkbox(&mut self.auto_update, "Auto-update");
         });
 
         self.render_file_load_status(ui);
 
         // Auto-update and manual refresh controls
-        let now = std::time::Instant::now();
-        if now.duration_since(self.last_update) >= Duration::from_secs(5) {
-            self.update_logs();
-            self.last_update = now;
+        if self.auto_update {
+            let now = std::time::Instant::now();
+            if now.duration_since(self.last_update) >= Duration::from_secs(5) {
+                self.update_logs();
+                self.last_update = now;
+            }
         }
 
-        if ui.button("Refresh").clicked() {
-            self.update_logs();
-        }
+        // Search bar
+        ui.horizontal(|ui| {
+            ui.label("Search:");
+            ui.text_edit_singleline(&mut self.search_query);
+        });
 
-        if ui.button("Flip order").clicked() {
-            self.log_order_earliest = !self.log_order_earliest;
-            self.sort_log_lines_by_time(self.log_order_earliest);
-        }
+        // Filter log entries based on search query
+        let filtered_entries: Vec<&String> = if self.search_query.is_empty() {
+            self.log_entries.iter().collect()
+        } else {
+            self.log_entries
+                .iter()
+                .filter(|entry| entry.contains(&self.search_query))
+                .collect()
+        };
 
-        // Create scrollable area that fills available space
-        ScrollArea::vertical()
+        // Create scrollable area that takes up all available space
+        let scroll_area = ScrollArea::vertical()
             .auto_shrink([false; 2])
-            .show(ui, |ui| {
-                Grid::new("log_grid")
-                    .striped(true)
-                    .spacing([2.0, 2.0])
-                    .min_col_width(50.0)
-                    .show(ui, |ui| {
-                        // Headers
-                        ui.style_mut().spacing.item_spacing.x = 10.0;
+            .stick_to_bottom(self.auto_scroll);
 
-                        ui.scope(|ui| {
-                            ui.set_min_width(160.0);
-                            ui.strong("Timestamp");
-                        });
-
-                        ui.scope(|ui| {
-                            ui.set_min_width(100.0);
-                            ui.strong("Component");
-                        });
-
-                        ui.scope(|ui| {
-                            ui.set_min_width(50.0);
-                            ui.strong("Line");
-                        });
-
-                        ui.scope(|ui| {
-                            ui.set_min_width(50.0);
-                            ui.strong("Level");
-                        });
-
-                        ui.scope(|ui| {
-                            ui.set_min_width(80.0);
-                            ui.strong("Thread Name");
-                        });
-
-                        ui.scope(|ui| {
-                            ui.set_min_width(200.0);
-                            ui.strong("Message");
-                        });
-
-                        ui.end_row();
-
-                        // Log entries
-                        for entry in &self.log_entries {
-                            ui.scope(|ui| {
-                                ui.set_min_width(160.0);
-                                ui.label(entry.timestamp.format("%Y-%m-%d %H:%M:%S").to_string());
-                            });
-
-                            ui.scope(|ui| {
-                                ui.set_min_width(100.0);
-                                ui.label(&entry.component);
-                            });
-
-                            ui.scope(|ui| {
-                                ui.set_min_width(50.0);
-                                ui.label(format!("({})", entry.line_number));
-                            });
-
-                            ui.scope(|ui| {
-                                ui.set_min_width(50.0);
-                                let level_text = match entry.level {
-                                    LogLevel::Info => egui::RichText::new("Info")
-                                        .color(egui::Color32::from_rgb(100, 200, 100)),
-                                    LogLevel::Warning => {
-                                        egui::RichText::new("Warn").color(egui::Color32::YELLOW)
-                                    }
-                                    LogLevel::Error => {
-                                        egui::RichText::new("Error").color(egui::Color32::RED)
-                                    }
-                                    _ => egui::RichText::new(entry.level.to_string()),
-                                };
-                                ui.label(level_text);
-                            });
-
-                            ui.scope(|ui| {
-                                ui.set_min_width(80.0);
-                                ui.label(&entry.thread_name);
-                            });
-
-                            ui.scope(|ui| {
-                                ui.set_min_width(200.0);
-                                ui.label(&entry.message);
-                            });
-
-                            ui.end_row();
-                        }
-                    });
+        // Ensure the ScrollArea has enough height to actually scroll
+        ui.with_layout(Layout::top_down_justified(egui::Align::LEFT), |ui| {
+            scroll_area.show(ui, |ui| {
+                // Display log entry string vector
+                for entry in filtered_entries {
+                    ui.label(entry);
+                }
             });
+        });
+
+        // Request a repaint if auto-scroll is enabled to ensure continuous scrolling
+        if self.auto_scroll && !self.log_entries.is_empty() {
+            ui.ctx().request_repaint();
+        }
     }
 
     fn render_database_tab(&self, ui: &mut egui::Ui) {
