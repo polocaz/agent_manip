@@ -19,6 +19,7 @@ pub struct LogEntry {
 pub struct LogReader {
     file: File,
     path: String,
+    pub last_line_read: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -66,44 +67,87 @@ impl LogReader {
         Ok(Self {
             file,
             path: path_str,
+            last_line_read: 0,
         })
     }
 
-    pub fn read_latest_entries(&self, count: usize, earliest_first: bool) -> Vec<LogEntry> {
-        File::open(&self.path).map_or_else(
-            |_| Vec::new(),
-            |file| {
-                let lines: Vec<_> = BufReader::new(file)
-                    .lines()
-                    .collect::<Result<Vec<_>, _>>()
-                    .unwrap_or_default();
+    // Read only new entries from the log file
+    pub fn read_new_entries(&mut self) -> Vec<String> {
+        let file = match File::open(&self.path) {
+            Ok(file) => file,
+            Err(_) => return Vec::new(),
+        };
 
-                // Collect log entries in the order they are read
-                let entries: Vec<LogEntry> = lines
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(line_num, line)| {
-                        match Self::parse_log_line(line, Some(line_num + 1)) {
-                            Ok(entry) => Some(entry),
-                            Err(LogManagerError::ParseError { message, .. }) => {
-                                eprintln!("Parse error at line {}: {}", line_num + 1, message);
-                                None
-                            }
-                            Err(_) => None,
-                        }
-                    })
-                    .collect();
+        let reader = BufReader::new(file);
+        let mut new_lines = Vec::new();
 
-                // Determine the slice to return based on earliest_first
-                if earliest_first {
-                    // Return the first `count` entries as they are read
-                    entries.into_iter().take(count).collect()
-                } else {
-                    // Return the last `count` entries as they are read
-                    entries.into_iter().rev().take(count).collect()
-                }
-            },
-        )
+        // Skip lines we've already read
+        for (i, line) in reader.lines().enumerate() {
+            if i < self.last_line_read {
+                continue;
+            }
+
+            if let Ok(line) = line {
+                new_lines.push(line);
+                self.last_line_read = i + 1;
+            }
+        }
+
+        new_lines
+    }
+
+    // Complete reloads
+    pub fn read_latest_entries(&self, count: usize, earliest_first: bool) -> Vec<String> {
+        let file = match File::open(&self.path) {
+            Ok(file) => file,
+            Err(_) => return Vec::new(),
+        };
+
+        let reader = BufReader::new(file);
+        let lines: Vec<String> = reader.lines().filter_map(Result::ok).collect();
+
+        if earliest_first {
+            lines.into_iter().take(count).collect()
+        } else {
+            lines.into_iter().rev().take(count).collect()
+        }
+
+        // This method is pretty slow, so we will load raw log entries for now
+        //
+        // File::open(&self.path).map_or_else(
+        //     |_| Vec::new(),
+        //     |file| {
+        //         let lines: Vec<_> = BufReader::new(file)
+        //             .lines()
+        //             .collect::<Result<Vec<_>, _>>()
+        //             .unwrap_or_default();
+
+        //         // Collect log entries in the order they are read
+        //         let entries: Vec<LogEntry> = lines
+        //             .iter()
+        //             .enumerate()
+        //             .filter_map(|(line_num, line)| {
+        //                 match Self::parse_log_line(line, Some(line_num + 1)) {
+        //                     Ok(entry) => Some(entry),
+        //                     Err(LogManagerError::ParseError { message, .. }) => {
+        //                         eprintln!("Parse error at line {}: {}", line_num + 1, message);
+        //                         None
+        //                     }
+        //                     Err(_) => None,
+        //                 }
+        //             })
+        //             .collect();
+
+        //         // Determine the slice to return based on earliest_first
+        //         if earliest_first {
+        //             // Return the first `count` entries as they are read
+        //             entries.into_iter().take(count).collect()
+        //         } else {
+        //             // Return the last `count` entries as they are read
+        //             entries.into_iter().rev().take(count).collect()
+        //         }
+        //     },
+        // )
     }
 
     fn parse_log_line(line: &str, line_num: Option<usize>) -> Result<LogEntry, LogManagerError> {
@@ -202,7 +246,7 @@ mod tests {
         writeln!(file, "2024-02-20T10:01:00Z ERROR Test message 2").unwrap();
 
         let mut reader = LogReader::new(log_path).unwrap();
-        let entries = reader.read_latest_entries(2);
+        let entries = reader.read_latest_entries(2, true);
 
         assert_eq!(entries.len(), 2);
     }
