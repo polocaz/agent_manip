@@ -24,7 +24,7 @@ A Rust-based GUI application for managing and monitoring the agent. Main goal is
 
 ## Prerequisites
 
-- Rust 1.70.0 or higher
+- Rust 1.81.0 or higher
 - Cargo package manager
 
 ## Installation
