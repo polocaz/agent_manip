@@ -30,6 +30,9 @@ rfd = "0.12.1"
 #[cfg(windows)]
 winapi = "0.3.9"
 
+# File system operations
+dirs = "5.0.1"
+
 [dev-dependencies]
 tempfile = "3.10.1"  # For temporary files in tests
 

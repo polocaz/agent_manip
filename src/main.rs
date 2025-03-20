@@ -1,6 +1,7 @@
 mod db;
 mod error;
 mod log_reader;
+mod service;
 mod ui;
 
 use anyhow::Result;
@@ -8,6 +9,8 @@ use eframe::{run_native, NativeOptions};
 use egui::ViewportBuilder;
 use std::path::PathBuf;
 use std::io::Write;
+use std::sync::{Arc, Mutex};
+use service::{ServiceConfig, ServiceManager, create_service_manager};
 
 fn main() -> Result<()> {
     // Initialize logging
@@ -42,6 +45,27 @@ fn main() -> Result<()> {
 
     let log_reader = log_reader::LogReader::new(&log_path)?;
 
+    // Create a default service configuration
+    let agent_path = match std::env::consts::OS {
+        "linux" => PathBuf::from("/opt/lsiagent/bin/lsiagentd"),
+        "macos" => PathBuf::from("/Applications/Lakeside Software/lsiagent.app/Contents/MacOS/lsiagent"),
+        "windows" => PathBuf::from("C:\\Program Files\\Lakeside Software\\lsiagent.exe"),
+        _ => PathBuf::from("./lsiagent"),
+    };
+
+    let service_config = ServiceConfig {
+        service_name: "lsiagent".to_string(),
+        executable_path: agent_path,
+        args: vec![],
+        working_directory: Some(PathBuf::from("/var/opt/lsiagent")),
+        restart_delay: std::time::Duration::from_secs(5),
+        max_restarts: 3,
+    };
+
+    // Create a service manager
+    let service_manager = create_service_manager(service_config);
+    let service_manager = Arc::new(Mutex::new(service_manager));
+
     // Create the eframe application
     let options = NativeOptions {
         viewport: ViewportBuilder::default().with_inner_size([800.0, 600.0]),
@@ -52,7 +76,7 @@ fn main() -> Result<()> {
     run_native(
         "LsiAgent Manager",
         options,
-        Box::new(|_cc| Ok(Box::new(ui::AgentManagerApp::new(database, log_reader)))),
+        Box::new(|_cc| Ok(Box::new(ui::AgentManagerApp::new(database, log_reader, service_manager)))),
     )
     .map_err(|e| anyhow::anyhow!("Failed to run application: {}", e))?;
 
