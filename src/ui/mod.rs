@@ -1,9 +1,11 @@
 use crate::db::Database;
 use crate::error::{validate_log_path, LogManagerError};
 use crate::log_reader::{LogEntry, LogLevel, LogReader};
+use crate::service::{ServiceManager, ServiceStatus};
 use eframe::egui::{self, Grid, Layout, ScrollArea};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
 #[derive(Default)]
 pub struct FileLoadStatus {
     message: String,
@@ -37,17 +39,26 @@ pub struct AgentManagerApp {
     file_load_status: FileLoadStatus,
     status_timeout: Duration,
     search_query: String,
+    service_manager: Arc<Mutex<Box<dyn ServiceManager>>>,
+    service_status: ServiceStatus,
+    service_last_check: std::time::Instant,
+    service_logs: Vec<String>,
 }
 
 #[derive(PartialEq)]
 enum Tab {
     Logs,
     Database,
+    Agent,
     Settings,
 }
 
 impl AgentManagerApp {
-    pub fn new(db: Database, log_reader: LogReader) -> Self {
+    pub fn new(
+        db: Database, 
+        log_reader: LogReader,
+        service_manager: Arc<Mutex<Box<dyn ServiceManager>>>,
+    ) -> Self {
         Self {
             auto_scroll: false,
             auto_update: true,
@@ -63,6 +74,10 @@ impl AgentManagerApp {
             search_query: String::new(),
             selected_tab: Tab::Logs,
             status_timeout: Duration::from_secs(5),
+            service_manager,
+            service_status: ServiceStatus::Unknown,
+            service_last_check: std::time::Instant::now(),
+            service_logs: Vec::new(),
         }
     }
 
@@ -156,10 +171,65 @@ impl AgentManagerApp {
             }
         }
     }
+
+    /// Update the service status
+    fn update_service_status(&mut self) {
+        if let Ok(manager) = self.service_manager.lock() {
+            if let Ok(status) = manager.get_status() {
+                self.service_status = status;
+            }
+        }
+    }
+
+    /// Start the service
+    fn start_service(&mut self) -> Result<(), String> {
+        if let Ok(manager) = self.service_manager.lock() {
+            manager.start_service().map_err(|e| e.to_string())
+        } else {
+            Err("Failed to access service manager".to_string())
+        }
+    }
+
+    /// Stop the service
+    fn stop_service(&mut self) -> Result<(), String> {
+        if let Ok(manager) = self.service_manager.lock() {
+            manager.stop_service().map_err(|e| e.to_string())
+        } else {
+            Err("Failed to access service manager".to_string())
+        }
+    }
+
+    /// Restart the service
+    fn restart_service(&mut self) -> Result<(), String> {
+        if let Ok(manager) = self.service_manager.lock() {
+            manager.restart_service().map_err(|e| e.to_string())
+        } else {
+            Err("Failed to access service manager".to_string())
+        }
+    }
+
+    /// Get service logs
+    fn update_service_logs(&mut self) {
+        if let Ok(manager) = self.service_manager.lock() {
+            if let Ok(logs) = manager.get_logs(100) {
+                self.service_logs = logs;
+            }
+        }
+    }
 }
 
 impl eframe::App for AgentManagerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Check service status periodically
+        let now = std::time::Instant::now();
+        if now.duration_since(self.service_last_check) >= Duration::from_secs(5) {
+            self.update_service_status();
+            if self.selected_tab == Tab::Agent {
+                self.update_service_logs();
+            }
+            self.service_last_check = now;
+        }
+
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 if ui.button("Logs").clicked() {
@@ -167,6 +237,12 @@ impl eframe::App for AgentManagerApp {
                 }
                 if ui.button("Database").clicked() {
                     self.selected_tab = Tab::Database;
+                }
+                if ui.button("Agent").clicked() {
+                    self.selected_tab = Tab::Agent;
+                    // Update service status when switching to Agent tab
+                    self.update_service_status();
+                    self.update_service_logs();
                 }
                 if ui.button("Settings").clicked() {
                     self.selected_tab = Tab::Settings;
@@ -177,6 +253,7 @@ impl eframe::App for AgentManagerApp {
         egui::CentralPanel::default().show(ctx, |ui| match self.selected_tab {
             Tab::Logs => self.render_logs_tab(ui),
             Tab::Database => self.render_database_tab(ui),
+            Tab::Agent => self.render_agent_tab(ui),
             Tab::Settings => self.render_settings_tab(ui),
         });
     }
@@ -309,5 +386,100 @@ impl AgentManagerApp {
                 self.file_load_status = FileLoadStatus::default();
             }
         }
+    }
+
+    fn render_agent_tab(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Agent Service Management");
+
+        // Service status display
+        ui.horizontal(|ui| {
+            ui.label("Current Status:");
+            let status_text = match self.service_status {
+                ServiceStatus::Running => egui::RichText::new("Running").color(egui::Color32::GREEN),
+                ServiceStatus::Stopped => egui::RichText::new("Stopped").color(egui::Color32::RED),
+                ServiceStatus::Unknown => egui::RichText::new("Unknown").color(egui::Color32::YELLOW),
+            };
+            ui.label(status_text);
+        });
+
+        // Service control buttons
+        ui.horizontal(|ui| {
+            if ui.button("Start").clicked() {
+                if let Err(e) = self.start_service() {
+                    // Show error
+                    self.file_load_status = FileLoadStatus {
+                        message: format!("Failed to start service: {}", e),
+                        level: StatusLevel::Error,
+                        timestamp: Some(std::time::Instant::now()),
+                    };
+                } else {
+                    // Show success
+                    self.file_load_status = FileLoadStatus {
+                        message: "Service started successfully".to_string(),
+                        level: StatusLevel::Success,
+                        timestamp: Some(std::time::Instant::now()),
+                    };
+                    // Update status
+                    self.update_service_status();
+                }
+            }
+
+            if ui.button("Stop").clicked() {
+                if let Err(e) = self.stop_service() {
+                    // Show error
+                    self.file_load_status = FileLoadStatus {
+                        message: format!("Failed to stop service: {}", e),
+                        level: StatusLevel::Error,
+                        timestamp: Some(std::time::Instant::now()),
+                    };
+                } else {
+                    // Show success
+                    self.file_load_status = FileLoadStatus {
+                        message: "Service stopped successfully".to_string(),
+                        level: StatusLevel::Success,
+                        timestamp: Some(std::time::Instant::now()),
+                    };
+                    // Update status
+                    self.update_service_status();
+                }
+            }
+
+            if ui.button("Restart").clicked() {
+                if let Err(e) = self.restart_service() {
+                    // Show error
+                    self.file_load_status = FileLoadStatus {
+                        message: format!("Failed to restart service: {}", e),
+                        level: StatusLevel::Error,
+                        timestamp: Some(std::time::Instant::now()),
+                    };
+                } else {
+                    // Show success
+                    self.file_load_status = FileLoadStatus {
+                        message: "Service restarted successfully".to_string(),
+                        level: StatusLevel::Success,
+                        timestamp: Some(std::time::Instant::now()),
+                    };
+                    // Update status
+                    self.update_service_status();
+                }
+            }
+
+            if ui.button("Refresh").clicked() {
+                self.update_service_status();
+                self.update_service_logs();
+            }
+        });
+
+        self.render_file_load_status(ui);
+
+        // Service logs
+        ui.heading("Service Logs");
+        ScrollArea::vertical()
+            .auto_shrink([false; 2])
+            .show(ui, |ui| {
+                for log in &self.service_logs {
+                    ui.label(log);
+                }
+            });
     }
 }
