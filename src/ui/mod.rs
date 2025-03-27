@@ -55,7 +55,7 @@ enum Tab {
 
 impl AgentManagerApp {
     pub fn new(
-        db: Database, 
+        db: Database,
         log_reader: LogReader,
         service_manager: Arc<Mutex<Box<dyn ServiceManager>>>,
     ) -> Self {
@@ -333,25 +333,37 @@ impl AgentManagerApp {
                 .collect()
         };
 
-        // Create scrollable area that takes up all available space
-        let scroll_area = ScrollArea::vertical()
+        // Show visible rows TODO: Add formatting to log output
+        let text_style = egui::TextStyle::Body;
+        let row_height = ui.text_style_height(&text_style);
+        let total_rows = filtered_entries.len();
+        egui::ScrollArea::vertical()
             .auto_shrink([false; 2])
-            .stick_to_bottom(self.auto_scroll);
-
-        // Ensure the ScrollArea has enough height to actually scroll
-        ui.with_layout(Layout::top_down_justified(egui::Align::LEFT), |ui| {
-            scroll_area.show(ui, |ui| {
-                // Display log entry string vector
-                for entry in filtered_entries {
-                    ui.label(entry);
+            .show_rows(ui, row_height, total_rows, |ui, row_range| {
+                for row in row_range {
+                    ui.label(filtered_entries[row]);
                 }
             });
-        });
 
-        // Request a repaint if auto-scroll is enabled to ensure continuous scrolling
-        if self.auto_scroll && !self.log_entries.is_empty() {
-            ui.ctx().request_repaint();
-        }
+        //// Create scrollable area that takes up all available space
+        //let scroll_area = ScrollArea::vertical()
+        //    .auto_shrink([false; 2])
+        //    .stick_to_bottom(self.auto_scroll);
+        //
+        //// Ensure the ScrollArea has enough height to actually scroll
+        //ui.with_layout(Layout::top_down_justified(egui::Align::LEFT), |ui| {
+        //    scroll_area.show(ui, |ui| {
+        //        // Display log entry string vector
+        //        for entry in filtered_entries {
+        //            ui.label(entry);
+        //        }
+        //    });
+        //});
+        //
+        //// Request a repaint if auto-scroll is enabled to ensure continuous scrolling
+        //if self.auto_scroll && !self.log_entries.is_empty() {
+        //    ui.ctx().request_repaint();
+        //}
     }
 
     fn render_database_tab(&self, ui: &mut egui::Ui) {
@@ -395,9 +407,13 @@ impl AgentManagerApp {
         ui.horizontal(|ui| {
             ui.label("Current Status:");
             let status_text = match self.service_status {
-                ServiceStatus::Running => egui::RichText::new("Running").color(egui::Color32::GREEN),
+                ServiceStatus::Running => {
+                    egui::RichText::new("Running").color(egui::Color32::GREEN)
+                }
                 ServiceStatus::Stopped => egui::RichText::new("Stopped").color(egui::Color32::RED),
-                ServiceStatus::Unknown => egui::RichText::new("Unknown").color(egui::Color32::YELLOW),
+                ServiceStatus::Unknown => {
+                    egui::RichText::new("Unknown").color(egui::Color32::YELLOW)
+                }
             };
             ui.label(status_text);
         });
