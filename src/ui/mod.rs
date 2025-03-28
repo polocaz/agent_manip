@@ -1,11 +1,10 @@
-use crate::db::Database;
+use crate::db::{Column, Database, QueryResult};
 use crate::error::{validate_log_path, LogManagerError};
 use crate::log_reader::{LogEntry, LogLevel, LogReader};
 use crate::service::{ServiceManager, ServiceStatus};
 use eframe::egui::{self, Grid, Layout, ScrollArea};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-
 #[derive(Default)]
 pub struct FileLoadStatus {
     message: String,
@@ -39,6 +38,15 @@ pub struct AgentManagerApp {
     file_load_status: FileLoadStatus,
     status_timeout: Duration,
     search_query: String,
+    // Database tab fields
+    db_path_input: String,
+    db_readonly: bool,
+    db_connected: bool,
+    sql_query: String,
+    query_result: Option<QueryResult>,
+    db_tables: Vec<String>,
+    selected_table: Option<String>,
+    // Agent status
     service_manager: Arc<Mutex<Box<dyn ServiceManager>>>,
     service_status: ServiceStatus,
     service_last_check: std::time::Instant,
@@ -74,6 +82,15 @@ impl AgentManagerApp {
             search_query: String::new(),
             selected_tab: Tab::Logs,
             status_timeout: Duration::from_secs(5),
+            // Database tab fields
+            db_path_input: String::new(),
+            db_readonly: true,
+            db_connected: false,
+            sql_query: String::new(),
+            query_result: None,
+            db_tables: Vec::new(),
+            selected_table: None,
+            // Service
             service_manager,
             service_status: ServiceStatus::Unknown,
             service_last_check: std::time::Instant::now(),
@@ -172,6 +189,86 @@ impl AgentManagerApp {
         }
     }
 
+    fn connect_to_database(&mut self) -> Result<(), String> {
+        let path = self.db_path_input.trim();
+        if path.is_empty() {
+            return Err("Database path cannot be empty".to_string());
+        }
+
+        // Create a new database connection
+        let db_result = if self.db_readonly {
+            Database::new_readonly(path)
+        } else {
+            Database::new(path)
+        };
+
+        match db_result {
+            Ok(new_db) => {
+                // Update the database connection
+                self.db = Arc::new(Mutex::new(new_db));
+                self.db_connected = true;
+
+                // Update the list of tables
+                self.update_table_list();
+
+                Ok(())
+            }
+            Err(e) => Err(format!("Failed to connect to database: {}", e)),
+        }
+    }
+
+    fn update_table_list(&mut self) {
+        if let Ok(db) = self.db.lock() {
+            if let Ok(tables) = db.list_tables() {
+                self.db_tables = tables;
+                // Reset selected table
+                self.selected_table = None;
+            }
+        }
+    }
+
+    fn execute_sql_query(&mut self) -> Result<(), String> {
+        if !self.db_connected {
+            return Err("Not connected to a database".to_string());
+        }
+
+        let query = self.sql_query.trim();
+        if query.is_empty() {
+            return Err("SQL query cannot be empty".to_string());
+        }
+
+        if let Ok(db) = self.db.lock() {
+            match db.execute_query(query) {
+                Ok(result) => {
+                    self.query_result = Some(result);
+                    Ok(())
+                }
+                Err(e) => Err(format!("Query execution failed: {}", e)),
+            }
+        } else {
+            Err("Failed to access database".to_string())
+        }
+    }
+
+    fn generate_schema_query(&mut self) -> Result<(), String> {
+        if let Some(table) = &self.selected_table {
+            self.sql_query = format!("PRAGMA table_info({})", table);
+            self.execute_sql_query()
+        } else {
+            Err("No table selected".to_string())
+        }
+    }
+
+    fn generate_select_query(&mut self) -> Result<(), String> {
+        if let Some(table) = &self.selected_table {
+            self.sql_query = format!("SELECT * FROM {} LIMIT 100", table);
+            self.execute_sql_query()
+        } else {
+            Err("No table selected".to_string())
+        }
+    }
+
+    /// SERVICE
     /// Update the service status
     fn update_service_status(&mut self) {
         if let Ok(manager) = self.service_manager.lock() {
@@ -344,34 +441,195 @@ impl AgentManagerApp {
                     ui.label(filtered_entries[row]);
                 }
             });
-
-        //// Create scrollable area that takes up all available space
-        //let scroll_area = ScrollArea::vertical()
-        //    .auto_shrink([false; 2])
-        //    .stick_to_bottom(self.auto_scroll);
-        //
-        //// Ensure the ScrollArea has enough height to actually scroll
-        //ui.with_layout(Layout::top_down_justified(egui::Align::LEFT), |ui| {
-        //    scroll_area.show(ui, |ui| {
-        //        // Display log entry string vector
-        //        for entry in filtered_entries {
-        //            ui.label(entry);
-        //        }
-        //    });
-        //});
-        //
-        //// Request a repaint if auto-scroll is enabled to ensure continuous scrolling
-        //if self.auto_scroll && !self.log_entries.is_empty() {
-        //    ui.ctx().request_repaint();
-        //}
     }
 
-    fn render_database_tab(&self, ui: &mut egui::Ui) {
-        // TODO: Will use self.db for database operations in future implementation
-        // Use self to get rid of the warning
-        let _ = self.db;
+    fn render_database_tab(&mut self, ui: &mut egui::Ui) {
         ui.heading("Database Management");
-        // Add database management UI here
+
+        // Database connection section
+        ui.horizontal(|ui| {
+            ui.label("Database path:");
+            ui.text_edit_singleline(&mut self.db_path_input);
+
+            if ui.button("Browse").clicked() {
+                if let Some(path) = rfd::FileDialog::new()
+                    .add_filter("SQLite database", &["db", "sqlite", "sqlite3"])
+                    .set_directory("./")
+                    .pick_file()
+                {
+                    self.db_path_input = path.display().to_string();
+                }
+            }
+
+            ui.checkbox(&mut self.db_readonly, "Read-only");
+
+            if ui
+                .button(if self.db_connected {
+                    "Disconnect"
+                } else {
+                    "Connect"
+                })
+                .clicked()
+            {
+                if self.db_connected {
+                    // Disconnect
+                    self.db_connected = false;
+                    self.query_result = None;
+                    self.db_tables.clear();
+                    self.selected_table = None;
+
+                    self.file_load_status = FileLoadStatus {
+                        message: "Disconnected from database".to_string(),
+                        level: StatusLevel::Success,
+                        timestamp: Some(std::time::Instant::now()),
+                    };
+                } else {
+                    // Connect
+                    match self.connect_to_database() {
+                        Ok(_) => {
+                            self.file_load_status = FileLoadStatus {
+                                message: format!("Connected to database: {}", self.db_path_input),
+                                level: StatusLevel::Success,
+                                timestamp: Some(std::time::Instant::now()),
+                            };
+                        }
+                        Err(e) => {
+                            self.file_load_status = FileLoadStatus {
+                                message: e,
+                                level: StatusLevel::Error,
+                                timestamp: Some(std::time::Instant::now()),
+                            };
+                        }
+                    }
+                }
+            }
+        });
+
+        self.render_file_load_status(ui);
+
+        if !self.db_connected {
+            ui.label("Connect to a database to execute queries");
+            return;
+        }
+
+        // Database tables selection
+        ui.horizontal(|ui| {
+            ui.label("Tables:");
+            egui::ComboBox::new("tables_combo", "")
+                .selected_text(self.selected_table.as_deref().unwrap_or("Select a table"))
+                .show_ui(ui, |ui| {
+                    for table in &self.db_tables {
+                        ui.selectable_value(&mut self.selected_table, Some(table.clone()), table);
+                    }
+                });
+
+            if ui.button("Refresh").clicked() {
+                self.update_table_list();
+            }
+
+            if ui.button("Schema").clicked() {
+                if let Err(e) = self.generate_schema_query() {
+                    self.file_load_status = FileLoadStatus {
+                        message: e,
+                        level: StatusLevel::Error,
+                        timestamp: Some(std::time::Instant::now()),
+                    };
+                }
+            }
+
+            if ui.button("Select *").clicked() {
+                if let Err(e) = self.generate_select_query() {
+                    self.file_load_status = FileLoadStatus {
+                        message: e,
+                        level: StatusLevel::Error,
+                        timestamp: Some(std::time::Instant::now()),
+                    };
+                }
+            }
+        });
+
+        // SQL Query section
+        ui.group(|ui| {
+            ui.label("SQL Query");
+
+            let query_editor = egui::TextEdit::multiline(&mut self.sql_query)
+                .desired_rows(5)
+                .desired_width(f32::INFINITY);
+            ui.add(query_editor);
+
+            ui.horizontal(|ui| {
+                if ui.button("Execute").clicked() {
+                    match self.execute_sql_query() {
+                        Ok(_) => {
+                            if let Some(result) = &self.query_result {
+                                self.file_load_status = FileLoadStatus {
+                                    message: format!(
+                                        "Query executed successfully. {} rows returned.",
+                                        result.affected_rows
+                                    ),
+                                    level: StatusLevel::Success,
+                                    timestamp: Some(std::time::Instant::now()),
+                                };
+                            }
+                        }
+                        Err(e) => {
+                            self.file_load_status = FileLoadStatus {
+                                message: e,
+                                level: StatusLevel::Error,
+                                timestamp: Some(std::time::Instant::now()),
+                            };
+                        }
+                    }
+                }
+
+                if ui.button("Clear").clicked() {
+                    self.sql_query.clear();
+                    self.query_result = None;
+                }
+            });
+        });
+
+        // Query Results section
+        ui.group(|ui| {
+            ui.heading("Query Results");
+
+            if let Some(result) = &self.query_result {
+                if result.columns.is_empty() {
+                    ui.label("No results to display");
+                    return;
+                }
+
+                ui.label(format!("Rows: {}", result.affected_rows));
+
+                // Table layout
+                ScrollArea::vertical()
+                    .auto_shrink([false; 2])
+                    .show(ui, |ui| {
+                        // Setup a grid for the results
+                        egui::Grid::new("query_results_grid")
+                            .striped(true)
+                            .spacing([5.0, 2.0])
+                            .min_col_width(100.0)
+                            .show(ui, |ui| {
+                                // Header row
+                                for col in &result.columns {
+                                    ui.label(egui::RichText::new(&col.name).strong());
+                                }
+                                ui.end_row();
+
+                                // Data rows
+                                for row in &result.rows {
+                                    for cell in row {
+                                        ui.label(cell);
+                                    }
+                                    ui.end_row();
+                                }
+                            });
+                    });
+            } else {
+                ui.label("Execute a query to see results");
+            }
+        });
     }
 
     fn render_settings_tab(&self, ui: &mut egui::Ui) {
