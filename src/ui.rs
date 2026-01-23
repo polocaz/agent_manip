@@ -4,21 +4,105 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Tabs, Wrap},
     Frame,
+    Terminal, backend::CrosstermBackend,
 };
+use anyhow::Result;
 
 use crate::app::{App, Tab};
 
+pub async fn show_startup_animation(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> Result<()> {
+    // Clear the screen first
+    terminal.clear()?;
+
+    let frames = vec![
+        // Frame 1: Header
+        vec![
+            Line::from(vec![Span::styled("[ S Y S T R A C K   S O F T W A R E   ( C ) 2000 ]", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))]),
+            Line::from(vec![]),
+            Line::from(vec![Span::styled("> INITIALIZING MODULE...", Style::default().fg(Color::Green))]),
+        ],
+        // Frame 2: Loading message
+        vec![
+            Line::from(vec![Span::styled("[ S Y S T R A C K   S O F T W A R E   ( C ) 2000 ]", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))]),
+            Line::from(vec![]),
+            Line::from(vec![Span::styled("> INITIALIZING MODULE...", Style::default().fg(Color::Green))]),
+            Line::from(vec![Span::styled("> LOADING: LSI AGENT", Style::default().fg(Color::Green))]),
+        ],
+        // Frame 3: ASCII Art
+        vec![
+            Line::from(vec![Span::styled("[ S Y S T R A C K   S O F T W A R E   ( C ) 2000 ]", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))]),
+            Line::from(vec![]),
+            Line::from(vec![Span::styled("> INITIALIZING MODULE...", Style::default().fg(Color::Green))]),
+            Line::from(vec![Span::styled("> LOADING: LSI AGENT", Style::default().fg(Color::Green))]),
+            Line::from(vec![]),
+            Line::from(vec![Span::styled("  ██╗     ███████╗██╗     █████╗  ██████╗ ███████╗███╗   ██╗████████╗", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))]),
+            Line::from(vec![Span::styled("  ██║     ██╔════╝██║    ██╔══██╗██╔════╝ ██╔════╝████╗  ██║╚══██╔══╝", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))]),
+            Line::from(vec![Span::styled("  ██║     ███████╗██║    ███████║██║  ███╗█████╗  ██╔██╗ ██║   ██║   ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))]),
+            Line::from(vec![Span::styled("  ██║     ╚════██║██║    ██╔══██║██║   ██║██╔══╝  ██║╚██╗██║   ██║   ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))]),
+            Line::from(vec![Span::styled("  ███████╗███████║██║    ██║  ██║╚██████╔╝███████╗██║ ╚████║   ██║   ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))]),
+            Line::from(vec![Span::styled("  ╚══════╝╚══════╝╚═╝    ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝   ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))]),
+        ],
+        // Frame 4: Status
+        vec![
+            Line::from(vec![Span::styled("[ S Y S T R A C K   S O F T W A R E   ( C ) 2000 ]", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))]),
+            Line::from(vec![]),
+            Line::from(vec![Span::styled("> INITIALIZING MODULE...", Style::default().fg(Color::Green))]),
+            Line::from(vec![Span::styled("> LOADING: LSI AGENT", Style::default().fg(Color::Green))]),
+            Line::from(vec![]),
+            Line::from(vec![Span::styled("  ██╗     ███████╗██╗     █████╗  ██████╗ ███████╗███╗   ██╗████████╗", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))]),
+            Line::from(vec![Span::styled("  ██║     ██╔════╝██║    ██╔══██╗██╔════╝ ██╔════╝████╗  ██║╚══██╔══╝", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))]),
+            Line::from(vec![Span::styled("  ██║     ███████╗██║    ███████║██║  ███╗█████╗  ██╔██╗ ██║   ██║   ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))]),
+            Line::from(vec![Span::styled("  ██║     ╚════██║██║    ██╔══██║██║   ██║██╔══╝  ██║╚██╗██║   ██║   ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))]),
+            Line::from(vec![Span::styled("  ███████╗███████║██║    ██║  ██║╚██████╔╝███████╗██║ ╚████║   ██║   ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))]),
+            Line::from(vec![Span::styled("  ╚══════╝╚══════╝╚═╝    ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝   ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))]),
+            Line::from(vec![]),
+            Line::from(vec![Span::styled("> STATUS: OPERATIONAL", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))]),
+        ],
+    ];
+
+    for (i, frame) in frames.iter().enumerate() {
+        terminal.draw(|f| {
+            let size = f.size();
+            let paragraph = Paragraph::new(frame.clone())
+                .alignment(Alignment::Center)
+                .block(Block::default().borders(Borders::NONE));
+            f.render_widget(paragraph, size);
+        })?;
+
+        // Different delays for different frames
+        let delay = match i {
+            0 => 1500, // Header - longer delay
+            1 => 1000, // Loading message
+            2 => 2000, // ASCII art - longer to show the logo
+            3 => 2000, // Final status - longer to show completion
+            _ => 500,
+        };
+        tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
+    }
+
+    // Final pause before main interface
+    tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
+
+    Ok(())
+}
+
 pub fn draw(f: &mut Frame, app: &mut App) {
     let size = f.size();
+
+    // Clear background to black for Pip-Boy aesthetic
+    f.render_widget(
+        ratatui::widgets::Clear,
+        size,
+    );
 
     // Create main layout
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3), // Title bar
+            Constraint::Length(5), // Title bar with ASCII art
             Constraint::Length(3), // Tabs
             Constraint::Min(1),    // Main content
-            Constraint::Length(3), // Status bar
+            Constraint::Length(2), // Status bar
         ])
         .split(size);
 
@@ -36,16 +120,34 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 }
 
 fn draw_title(f: &mut Frame, area: Rect) {
-    let title = Paragraph::new("LsiAgent Manager")
-        .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+    let title_text = vec![
+        Line::from(vec![
+            Span::styled("╔══════════════════════════════════════════════════════════════════════════════╗", Style::default().fg(Color::Green)),
+        ]),
+        Line::from(vec![
+            Span::styled("║", Style::default().fg(Color::Green)),
+            Span::styled("                          LSI AGENT MANAGEMENT TERMINAL                          ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+            Span::styled("║", Style::default().fg(Color::Green)),
+        ]),
+        Line::from(vec![
+            Span::styled("║", Style::default().fg(Color::Green)),
+            Span::styled("                        [PIP-BOY INTERFACE v2.1.7]                        ", Style::default().fg(Color::Green)),
+            Span::styled("║", Style::default().fg(Color::Green)),
+        ]),
+        Line::from(vec![
+            Span::styled("╚══════════════════════════════════════════════════════════════════════════════╝", Style::default().fg(Color::Green)),
+        ]),
+    ];
+
+    let title = Paragraph::new(title_text)
         .alignment(Alignment::Center)
-        .block(Block::default().borders(Borders::ALL));
+        .block(Block::default().borders(Borders::NONE));
 
     f.render_widget(title, area);
 }
 
 fn draw_tabs(f: &mut Frame, area: Rect, app: &App) {
-    let tab_titles = vec!["Overview", "Resources", "Network", "Logs", "Settings"];
+    let tab_titles = vec!["[OVERVIEW]", "[RESOURCES]", "[NETWORK]", "[LOGS]", "[SETTINGS]"];
 
     let tabs = Tabs::new(tab_titles)
         .select(match app.current_tab {
@@ -55,9 +157,13 @@ fn draw_tabs(f: &mut Frame, area: Rect, app: &App) {
             Tab::Logs => 3,
             Tab::Settings => 4,
         })
-        .style(Style::default().fg(Color::White))
-        .highlight_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
-        .block(Block::default().borders(Borders::ALL).title("Tabs"));
+        .style(Style::default().fg(Color::Green))
+        .highlight_style(Style::default().fg(Color::Black).bg(Color::Green).add_modifier(Modifier::BOLD))
+        .block(Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Green))
+            .title(" NAVIGATION MODULE ")
+            .title_style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)));
 
     f.render_widget(tabs, area);
 }
@@ -92,13 +198,17 @@ fn draw_overview(f: &mut Frame, area: Rect, app: &App) {
 
     let stats = app.daemon_manager.get_process_stats();
     let status_text = if let Some(pid) = stats.pid {
-        format!("Daemon Status: {} (PID: {}, Process: {})", daemon_state, pid, app.daemon_manager.get_process_name())
+        format!("DAEMON STATUS: {} | PID: {} | PROCESS: {}", daemon_state, pid, app.daemon_manager.get_process_name())
     } else {
-        format!("Daemon Status: {} (Looking for: {})", daemon_state, app.daemon_manager.get_process_name())
+        format!("DAEMON STATUS: {} | SEARCHING FOR: {}", daemon_state, app.daemon_manager.get_process_name())
     };
     let status = Paragraph::new(status_text)
         .style(Style::default().fg(state_color).add_modifier(Modifier::BOLD))
-        .block(Block::default().borders(Borders::ALL).title("Status"));
+        .block(Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Green))
+            .title(" SYSTEM STATUS ")
+            .title_style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)));
 
     f.render_widget(status, chunks[0]);
 
@@ -109,31 +219,35 @@ fn draw_overview(f: &mut Frame, area: Rect, app: &App) {
 
     let metrics_text = vec![
         Line::from(vec![
-            Span::styled("CPU: ", Style::default().fg(Color::White)),
-            Span::styled(format!("{:.1}%", stats.cpu_usage), Style::default().fg(Color::Cyan)),
+            Span::styled("CPU USAGE: ", Style::default().fg(Color::Green)),
+            Span::styled(format!("{:.1}%", stats.cpu_usage), Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
         ]),
         Line::from(vec![
-            Span::styled("Memory: ", Style::default().fg(Color::White)),
-            Span::styled(format_memory(stats.memory_usage), Style::default().fg(Color::Cyan)),
+            Span::styled("MEMORY: ", Style::default().fg(Color::Green)),
+            Span::styled(format_memory(stats.memory_usage), Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
         ]),
         Line::from(vec![
-            Span::styled("Connection: ", Style::default().fg(Color::White)),
+            Span::styled("CONNECTION: ", Style::default().fg(Color::Green)),
             Span::styled(
-                if conn_status.is_connected { "Connected" } else { "Disconnected" },
-                Style::default().fg(if conn_status.is_connected { Color::Green } else { Color::Red }),
+                if conn_status.is_connected { "CONNECTED" } else { "DISCONNECTED" },
+                Style::default().fg(if conn_status.is_connected { Color::Green } else { Color::Red }).add_modifier(Modifier::BOLD),
             ),
         ]),
         Line::from(vec![
-            Span::styled("Data Flow: ", Style::default().fg(Color::White)),
+            Span::styled("DATA FLOW: ", Style::default().fg(Color::Green)),
             Span::styled(
-                if net_stats.data_flow_active { "Active" } else { "Inactive" },
-                Style::default().fg(if net_stats.data_flow_active { Color::Green } else { Color::Red }),
+                if net_stats.data_flow_active { "ACTIVE" } else { "INACTIVE" },
+                Style::default().fg(if net_stats.data_flow_active { Color::Green } else { Color::Red }).add_modifier(Modifier::BOLD),
             ),
         ]),
     ];
 
     let metrics = Paragraph::new(metrics_text)
-        .block(Block::default().borders(Borders::ALL).title("Key Metrics"));
+        .block(Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Green))
+            .title(" CORE METRICS ")
+            .title_style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)));
 
     f.render_widget(metrics, chunks[1]);
 
@@ -154,7 +268,11 @@ fn draw_overview(f: &mut Frame, area: Rect, app: &App) {
 
     let events = Paragraph::new(events_text)
         .wrap(Wrap { trim: true })
-        .block(Block::default().borders(Borders::ALL).title("Service Status"));
+        .block(Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Green))
+            .title(" SERVICE LOGS ")
+            .title_style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)));
 
     f.render_widget(events, chunks[2]);
 }
@@ -174,41 +292,56 @@ fn draw_resources(f: &mut Frame, area: Rect, app: &App) {
     let stats = app.daemon_manager.get_process_stats();
 
     // CPU usage and System Load
-    let cpu_load_text = format!("CPU: {:.1}% | System Load: {:.2}",
+    let cpu_load_text = format!("PROCESSOR: {:.1}% | SYSTEM LOAD: {:.2}",
         stats.cpu_usage,
         stats.system_load_avg
     );
     let cpu_load = Paragraph::new(cpu_load_text)
-        .block(Block::default().borders(Borders::ALL).title("CPU & Load"));
+        .style(Style::default().fg(Color::Green))
+        .block(Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Green))
+            .title(" CPU CORE ")
+            .title_style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)));
 
     f.render_widget(cpu_load, chunks[0]);
 
     // Memory usage (Process and System)
-    let memory_text = format!("Process: {} | Virtual: {}\nSystem: {} / {}",
+    let memory_text = format!("PROCESS: {} | VIRTUAL: {}\nSYSTEM: {} / {}",
         format_memory(stats.memory_usage),
         format_memory(stats.virtual_memory),
         format_memory(stats.system_memory_used),
         format_memory(stats.system_memory_total)
     );
     let memory = Paragraph::new(memory_text)
-        .block(Block::default().borders(Borders::ALL).title("Memory"));
+        .style(Style::default().fg(Color::Green))
+        .block(Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Green))
+            .title(" MEMORY MODULE ")
+            .title_style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)));
 
     f.render_widget(memory, chunks[1]);
 
     // I/O Statistics
-    let io_text = format!("Disk Read: {} | Write: {}\nNet RX: {} | TX: {}",
+    let io_text = format!("DISK READ: {} | WRITE: {}\nNET RX: {} | TX: {}",
         format_bytes(stats.disk_read_bytes),
         format_bytes(stats.disk_write_bytes),
         format_bytes(stats.network_rx_bytes),
         format_bytes(stats.network_tx_bytes)
     );
     let io_stats = Paragraph::new(io_text)
-        .block(Block::default().borders(Borders::ALL).title("I/O Stats"));
+        .style(Style::default().fg(Color::Green))
+        .block(Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Green))
+            .title(" I/O SYSTEMS ")
+            .title_style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)));
 
     f.render_widget(io_stats, chunks[2]);
 
     // Process Details
-    let details_text = format!("Process: {}\nPID: {:?} | PPID: {:?}\nState: {} | Priority: {}\nThreads: {} | Files: {}\nUptime: {}s",
+    let details_text = format!("PROCESS: {}\nPID: {:?} | PPID: {:?}\nSTATE: {} | PRIORITY: {}\nTHREADS: {} | OPEN FILES: {}\nUPTIME: {}s",
         app.daemon_manager.get_process_name(),
         stats.pid,
         stats.ppid,
@@ -219,18 +352,28 @@ fn draw_resources(f: &mut Frame, area: Rect, app: &App) {
         stats.uptime_seconds
     );
     let details = Paragraph::new(details_text)
-        .block(Block::default().borders(Borders::ALL).title("Process Details"));
+        .style(Style::default().fg(Color::Green))
+        .block(Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Green))
+            .title(" PROCESS INFO ")
+            .title_style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)));
 
     f.render_widget(details, chunks[3]);
 
     // Additional Info
-    let additional_text = format!("Start Time: {}\nContext Switches: {}\nPage Faults: {}",
+    let additional_text = format!("START TIME: {}\nCONTEXT SWITCHES: {}\nPAGE FAULTS: {}",
         format_timestamp(stats.start_time),
         stats.context_switches,
         stats.page_faults
     );
     let additional = Paragraph::new(additional_text)
-        .block(Block::default().borders(Borders::ALL).title("Additional Info"));
+        .style(Style::default().fg(Color::Green))
+        .block(Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Green))
+            .title(" ADVANCED METRICS ")
+            .title_style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)));
 
     f.render_widget(additional, chunks[4]);
 }
@@ -250,68 +393,97 @@ fn draw_network(f: &mut Frame, area: Rect, app: &App) {
 
     // Connection status
     let conn_color = if conn_status.is_connected { Color::Green } else { Color::Red };
-    let conn_text = format!("Status: {}\nEndpoint: {}\nDuration: {:.1}s",
-        if conn_status.is_connected { "Connected" } else { "Disconnected" },
+    let conn_text = format!("STATUS: {}\nENDPOINT: {}\nDURATION: {:.1}s",
+        if conn_status.is_connected { "CONNECTED" } else { "DISCONNECTED" },
         conn_status.endpoint,
         conn_status.connection_duration.as_secs_f32()
     );
     let connection = Paragraph::new(conn_text)
         .style(Style::default().fg(conn_color))
-        .block(Block::default().borders(Borders::ALL).title("Connection"));
+        .block(Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Green))
+            .title(" CONNECTION STATUS ")
+            .title_style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)));
 
     f.render_widget(connection, chunks[0]);
 
     // Traffic stats
-    let traffic_text = format!("Sent: {} ({} packets)\nReceived: {} ({} packets)\nData Flow: {}",
+    let traffic_text = format!("SENT: {} ({} PACKETS)\nRECEIVED: {} ({} PACKETS)\nDATA FLOW: {}",
         format_bytes(net_stats.bytes_sent),
         net_stats.packets_sent,
         format_bytes(net_stats.bytes_received),
         net_stats.packets_received,
-        if net_stats.data_flow_active { "Active" } else { "Inactive" }
+        if net_stats.data_flow_active { "ACTIVE" } else { "INACTIVE" }
     );
     let traffic = Paragraph::new(traffic_text)
-        .block(Block::default().borders(Borders::ALL).title("Network Traffic"));
+        .style(Style::default().fg(Color::Green))
+        .block(Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Green))
+            .title(" NETWORK TRAFFIC ")
+            .title_style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)));
 
     f.render_widget(traffic, chunks[1]);
 
     // Additional details
-    let details = Paragraph::new("Network monitoring details will be displayed here...")
-        .block(Block::default().borders(Borders::ALL).title("Network Details"));
+    let details = Paragraph::new("NETWORK MONITORING DETAILS WILL BE DISPLAYED HERE...")
+        .style(Style::default().fg(Color::Green))
+        .block(Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Green))
+            .title(" NETWORK ANALYSIS ")
+            .title_style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)));
 
     f.render_widget(details, chunks[2]);
 }
 
 fn draw_logs(f: &mut Frame, area: Rect, _app: &App) {
-    let logs = Paragraph::new("Log viewer will be implemented here...\n\nUse arrow keys to scroll\nPress 'f' to filter logs")
+    let logs = Paragraph::new("LOG VIEWER WILL BE IMPLEMENTED HERE...\n\nUSE ARROW KEYS TO SCROLL\nPRESS 'F' TO FILTER LOGS")
+        .style(Style::default().fg(Color::Green))
         .wrap(Wrap { trim: true })
-        .block(Block::default().borders(Borders::ALL).title("Logs"));
+        .block(Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Green))
+            .title(" SYSTEM LOGS ")
+            .title_style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)));
 
     f.render_widget(logs, area);
 }
 
 fn draw_settings(f: &mut Frame, area: Rect, _app: &App) {
-    let settings = Paragraph::new("Settings will be implemented here...\n\n- Refresh rate\n- Alert thresholds\n- Daemon configuration\n- Network endpoints")
-        .block(Block::default().borders(Borders::ALL).title("Settings"));
+    let settings = Paragraph::new("SETTINGS WILL BE IMPLEMENTED HERE...\n\n- REFRESH RATE\n- ALERT THRESHOLDS\n- DAEMON CONFIGURATION\n- NETWORK ENDPOINTS")
+        .style(Style::default().fg(Color::Green))
+        .block(Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Green))
+            .title(" CONFIGURATION ")
+            .title_style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)));
 
     f.render_widget(settings, area);
 }
 
 fn draw_status_bar(f: &mut Frame, area: Rect, app: &App) {
     let management_type = if app.daemon_manager.is_using_systemctl() {
-        "systemctl"
+        "SYSTEMCTL"
     } else {
-        "direct"
+        "DIRECT"
     };
 
     let status_text = format!(
-        " [F1-F5] Tabs [h/l/j/k] Navigate | [S] Start [X] Stop [R] Refresh [Q] Quit | Mode: {} | Refresh: {}ms ",
+        " [F1-F5] NAV | [H/L/J/K] MOVE | [S] START | [X] STOP | [R] REFRESH | [Q] QUIT | MODE: {} | INTERVAL: {}ms ",
         management_type,
         app.refresh_rate.as_millis()
     );
 
     let status = Paragraph::new(status_text)
-        .style(Style::default().fg(Color::White).bg(Color::Blue))
-        .alignment(Alignment::Center);
+        .style(Style::default().fg(Color::Green).bg(Color::Black))
+        .alignment(Alignment::Center)
+        .block(Block::default()
+            .borders(Borders::TOP)
+            .border_style(Style::default().fg(Color::Green))
+            .title(" STATUS MODULE ")
+            .title_style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)));
 
     f.render_widget(status, area);
 }

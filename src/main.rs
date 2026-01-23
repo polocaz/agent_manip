@@ -28,6 +28,9 @@ async fn main() -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
+    // Show startup animation
+    ui::show_startup_animation(&mut terminal).await?;
+
     // Create app and run it
     let app = App::new()?;
     let res = run_app(&mut terminal, app).await;
