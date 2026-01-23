@@ -928,9 +928,21 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &mut App) {
 
     // Create log file tabs for available files
     let available_logs = get_available_log_files();
+
+    // Ensure currently selected log is valid. If not, pick the first available.
+    if !available_logs.is_empty() && !available_logs.contains(&app.current_log_file) {
+        app.current_log_file = available_logs[0];
+        app.logs_scroll = 0;
+        app.last_log_content_len = 0;
+    }
+
     let mut log_tabs = Vec::new();
-    
-    for &log_idx in &available_logs {
+
+    // If no logs found, add a placeholder
+    if available_logs.is_empty() {
+        log_tabs.push(Span::styled("[NO LOGS FOUND]", Style::default().fg(Color::Red)));
+    } else {
+        for &log_idx in &available_logs {
         let tab_text = if log_idx == app.current_log_file {
             format!("[{}*]", log_idx)
         } else {
@@ -946,6 +958,7 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &mut App) {
         log_tabs.push(Span::styled(tab_text, style));
         log_tabs.push(Span::raw(" "));
     }
+    }
 
     // Split the area for log tabs and content
     let chunks = Layout::default()
@@ -956,15 +969,22 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &mut App) {
         ])
         .split(area);
 
-    // Draw log file tabs
-    let tabs_line = Line::from(log_tabs);
+    // Draw log file tabs with a compact label and clear highlight for selection.
+    // Build a single-line composed of a left label followed by the tab spans.
+    let mut composed_spans = Vec::new();
+
+    // Left label
+    composed_spans.push(Span::styled("LOGS: ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)));
+
+    // Append the tab spans we already built
+    composed_spans.extend(log_tabs.into_iter());
+
+    // Convert to a single Line and render inside a Paragraph without title
+    let tabs_line = Line::from(composed_spans);
     let tabs_paragraph = Paragraph::new(vec![tabs_line])
-        .block(Block::default()
-            .borders(Borders::TOP)
-            .border_style(Style::default().fg(Color::Green))
-            .title(" AVAILABLE LOG FILES ")
-            .title_style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)));
-    
+        .block(Block::default().borders(Borders::TOP).border_style(Style::default().fg(Color::Green)))
+        .style(Style::default().fg(Color::Green));
+
     f.render_widget(tabs_paragraph, chunks[0]);
 
     // Draw log content

@@ -65,7 +65,7 @@ impl App {
     pub fn new() -> Result<Self> {
         Ok(Self {
             should_quit: false,
-            current_tab: Tab::Overview,
+            current_tab: Tab::Overview, // Back to default
             daemon_manager: DaemonManager::new()?,
             network_monitor: NetworkMonitor::new()?,
             last_update: Instant::now(),
@@ -233,9 +233,9 @@ impl App {
                 }
             }
             crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
-                // Handle main tab clicks - tabs are typically at y=5-6, x varies by tab
+                // Handle main tab clicks - tabs are at y=5-7, x varies by tab
                 // Each tab is roughly equal width
-                if mouse.row >= 5 && mouse.row <= 6 { // Main tab area
+                if mouse.row >= 5 && mouse.row <= 7 { // Main tab area (3 lines high)
                     let tab_width = 80 / 6; // Approximate width per tab (80 chars / 6 tabs)
                     let clicked_tab = (mouse.column as usize) / tab_width;
                     
@@ -251,7 +251,7 @@ impl App {
                 }
                 
                 // Handle log file tab clicks on Logs tab
-                if self.current_tab == Tab::Logs && mouse.row >= 7 && mouse.row <= 7 { // Log tabs area
+                if self.current_tab == Tab::Logs && mouse.row == 8 { // Log tabs area (row 8)
                     // Check which log file tab was clicked
                     // Each tab is roughly "[X]" (3 chars) + space (1 char) = 4 chars wide
                     let tab_width = 4;
