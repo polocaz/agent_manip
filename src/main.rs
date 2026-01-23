@@ -35,7 +35,6 @@ async fn main() -> Result<()> {
     // Check if running as root after animation
     let is_root = unsafe { libc::geteuid() == 0 };
     if !is_root {
-        // Restore terminal and exit
         disable_raw_mode()?;
         execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
         terminal.show_cursor()?;

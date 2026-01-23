@@ -7,8 +7,20 @@ use ratatui::{
     Terminal, backend::CrosstermBackend,
 };
 use anyhow::Result;
+use crossterm::event::{self, Event, KeyCode};
 
 use crate::app::{App, Tab};
+
+/// Check for keyboard input during animation
+/// Returns Some(KeyCode) if a key was pressed, None otherwise
+fn check_animation_input() -> Option<KeyCode> {
+    if event::poll(std::time::Duration::from_millis(10)).unwrap_or(false) {
+        if let Ok(Event::Key(key)) = event::read() {
+            return Some(key.code);
+        }
+    }
+    None
+}
 
 pub async fn show_startup_animation(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> Result<()> {
     // Clear the screen first
@@ -98,7 +110,7 @@ pub async fn show_startup_animation(terminal: &mut Terminal<CrosstermBackend<std
         let start_line = if frame_index == 0 { 0 } else { final_frames[frame_index - 1].len() };
         let new_lines = &final_frame[start_line..];
 
-        // Type out new lines character by character
+        // Type out new lines - different behavior for ASCII art vs text
         for (line_idx, line) in new_lines.iter().enumerate() {
             let actual_line_idx = start_line + line_idx;
 
@@ -108,60 +120,300 @@ pub async fn show_startup_animation(terminal: &mut Terminal<CrosstermBackend<std
                 continue;
             }
 
-            // For lines with content, type them out character by character
-            if let Some(span) = line.spans.first() {
-                let text = span.content.as_ref();
-                let chars: Vec<char> = text.chars().collect();
+            // Special handling for ASCII art frame (frame_index == 2) - show complete lines
+            if frame_index == 2 {
+                // For ASCII art, show each line completely at once
+                current_frame.resize(actual_line_idx, Line::from(vec![]));
+                if actual_line_idx < current_frame.len() {
+                    current_frame[actual_line_idx] = line.clone();
+                } else {
+                    current_frame.push(line.clone());
+                }
 
-                for char_idx in 0..=chars.len() {
-                    // Build the current line with partial text
-                    let partial_text: String = chars.iter().take(char_idx).collect();
-                    let mut partial_line = line.clone();
-                    if let Some(span_mut) = partial_line.spans.first_mut() {
-                        span_mut.content = partial_text.into();
+                // Draw the current state with the complete line
+                terminal.draw(|f| {
+                    let size = f.size();
+                    let chunks = Layout::default()
+                        .direction(Direction::Vertical)
+                        .constraints([
+                            Constraint::Min(10), // Main animation area
+                            Constraint::Length(1), // Status line
+                        ])
+                        .split(size);
+
+                    // Main animation content
+                    let paragraph = Paragraph::new(current_frame.clone())
+                        .alignment(Alignment::Center)
+                        .block(Block::default().borders(Borders::NONE));
+                    f.render_widget(paragraph, chunks[0]);
+
+                    // Status line with controls
+                    let status = Paragraph::new(Line::from(vec![
+                        Span::styled("[ENTER]", Style::default().fg(Color::Cyan)),
+                        Span::raw(" Skip "),
+                        Span::styled("[Q]", Style::default().fg(Color::Cyan)),
+                        Span::raw(" Quit"),
+                    ]))
+                    .alignment(Alignment::Center)
+                    .style(Style::default().fg(Color::White));
+                    f.render_widget(status, chunks[1]);
+                })?;
+
+                // Small delay between lines for cascading effect
+                // Check for user input to skip or quit
+                if let Some(key) = check_animation_input() {
+                    match key {
+                        KeyCode::Enter => {
+                            // Skip to final frame
+                            terminal.draw(|f| {
+                                let size = f.size();
+                                let chunks = Layout::default()
+                                    .direction(Direction::Vertical)
+                                    .constraints([
+                                        Constraint::Min(10), // Main animation area
+                                        Constraint::Length(1), // Status line
+                                    ])
+                                    .split(size);
+
+                                // Main animation content
+                                let paragraph = Paragraph::new(final_frames.last().unwrap().clone())
+                                    .alignment(Alignment::Center)
+                                    .block(Block::default().borders(Borders::NONE));
+                                f.render_widget(paragraph, chunks[0]);
+
+                                // Status line with controls
+                                let status = Paragraph::new(Line::from(vec![
+                                    Span::styled("[ENTER]", Style::default().fg(Color::Cyan)),
+                                    Span::raw(" Skip Animation  "),
+                                    Span::styled("[Q]", Style::default().fg(Color::Cyan)),
+                                    Span::raw(" Quit"),
+                                ]))
+                                .alignment(Alignment::Center)
+                                .style(Style::default().fg(Color::White));
+                                f.render_widget(status, chunks[1]);
+                            })?;
+                            return Ok(());
+                        }
+                        KeyCode::Char('q') | KeyCode::Char('Q') => {
+                            // Exit application
+                            std::process::exit(0);
+                        }
+                        _ => {}
                     }
+                }
+                tokio::time::sleep(tokio::time::Duration::from_millis(80)).await;
+            } else {
+                // For regular text, type character by character
+                if let Some(span) = line.spans.first() {
+                    let text = span.content.as_ref();
+                    let chars: Vec<char> = text.chars().collect();
 
-                    // Update the current frame
-                    current_frame.resize(actual_line_idx, Line::from(vec![]));
-                    if actual_line_idx < current_frame.len() {
-                        current_frame[actual_line_idx] = partial_line;
-                    } else {
-                        current_frame.push(partial_line);
-                    }
+                    for char_idx in 0..=chars.len() {
+                        // Build the current line with partial text
+                        let partial_text: String = chars.iter().take(char_idx).collect();
+                        let mut partial_line = line.clone();
+                        if let Some(span_mut) = partial_line.spans.first_mut() {
+                            span_mut.content = partial_text.into();
+                        }
 
-                    // Draw the current state
-                    terminal.draw(|f| {
-                        let size = f.size();
-                        let paragraph = Paragraph::new(current_frame.clone())
+                        // Update the current frame
+                        current_frame.resize(actual_line_idx, Line::from(vec![]));
+                        if actual_line_idx < current_frame.len() {
+                            current_frame[actual_line_idx] = partial_line;
+                        } else {
+                            current_frame.push(partial_line);
+                        }
+
+                        // Draw the current state
+                        terminal.draw(|f| {
+                            let size = f.size();
+                            let chunks = Layout::default()
+                                .direction(Direction::Vertical)
+                                .constraints([
+                                    Constraint::Min(10), // Main animation area
+                                    Constraint::Length(1), // Status line
+                                ])
+                                .split(size);
+
+                            // Main animation content
+                            let paragraph = Paragraph::new(current_frame.clone())
+                                .alignment(Alignment::Center)
+                                .block(Block::default().borders(Borders::NONE));
+                            f.render_widget(paragraph, chunks[0]);
+
+                            // Status line with controls
+                            let status = Paragraph::new(Line::from(vec![
+                                Span::styled("[ENTER]", Style::default().fg(Color::Cyan)),
+                                Span::raw(" Skip Animation  "),
+                                Span::styled("[Q]", Style::default().fg(Color::Cyan)),
+                                Span::raw(" Quit"),
+                            ]))
                             .alignment(Alignment::Center)
-                            .block(Block::default().borders(Borders::NONE));
-                        f.render_widget(paragraph, size);
-                    })?;
+                            .style(Style::default().fg(Color::White));
+                            f.render_widget(status, chunks[1]);
+                        })?;
 
-                    // Typing delay (faster for ASCII art, slower for status messages)
-                    let char_delay = if frame_index == 2 { 3 } else { 20 }; // ASCII art faster, text slower
-                    tokio::time::sleep(tokio::time::Duration::from_millis(char_delay)).await;
+                        // Typing delay (ultra fast for instant boot)
+                        // Check for user input to skip or quit
+                        if let Some(key) = check_animation_input() {
+                            match key {
+                                KeyCode::Enter => {
+                                    // Skip to final frame
+                                    terminal.draw(|f| {
+                                        let size = f.size();
+                                        let chunks = Layout::default()
+                                            .direction(Direction::Vertical)
+                                            .constraints([
+                                                Constraint::Min(10), // Main animation area
+                                                Constraint::Length(1), // Status line
+                                            ])
+                                            .split(size);
+
+                                        // Main animation content
+                                        let paragraph = Paragraph::new(final_frames.last().unwrap().clone())
+                                            .alignment(Alignment::Center)
+                                            .block(Block::default().borders(Borders::NONE));
+                                        f.render_widget(paragraph, chunks[0]);
+
+                                        // Status line with controls
+                                        let status = Paragraph::new(Line::from(vec![
+                                            Span::styled("[ENTER]", Style::default().fg(Color::Cyan)),
+                                            Span::raw(" Skip Animation  "),
+                                            Span::styled("[Q]", Style::default().fg(Color::Cyan)),
+                                            Span::raw(" Quit"),
+                                        ]))
+                                        .alignment(Alignment::Center)
+                                        .style(Style::default().fg(Color::White));
+                                        f.render_widget(status, chunks[1]);
+                                    })?;
+                                    return Ok(());
+                                }
+                                KeyCode::Char('q') | KeyCode::Char('Q') => {
+                                    // Exit application
+                                    std::process::exit(0);
+                                }
+                                _ => {}
+                            }
+                        }
+                        let char_delay = 0; // No delay - instant appearance
+                        tokio::time::sleep(tokio::time::Duration::from_millis(char_delay)).await;
+                    }
                 }
             }
         }
 
-        // Pause after each complete frame
+        // Pause after each complete frame (ultra fast boot)
         let frame_delay = match frame_index {
-            0 => 800, // Header
-            1 => 600, // Loading message
-            2 => 1200, // ASCII art
-            3 => if is_root { 1200 } else { 2500 }, // Final status
-            _ => 500,
+            0 => 0, // Header - instant
+            1 => 0, // Loading message - instant
+            2 => 0, // ASCII art - instant
+            3 => if is_root { 500 } else { 0 }, // Final status - brief pause for success, instant for error
+            _ => 0,
         };
+
+        // Check for input during frame delays
+        if frame_delay > 0 {
+            if let Some(key) = check_animation_input() {
+                match key {
+                    KeyCode::Enter => {
+                        // Skip to final frame
+                        terminal.draw(|f| {
+                            let size = f.size();
+                            let chunks = Layout::default()
+                                .direction(Direction::Vertical)
+                                .constraints([
+                                    Constraint::Min(10), // Main animation area
+                                    Constraint::Length(1), // Status line
+                                ])
+                                .split(size);
+
+                            // Main animation content
+                            let paragraph = Paragraph::new(final_frames.last().unwrap().clone())
+                                .alignment(Alignment::Center)
+                                .block(Block::default().borders(Borders::NONE));
+                            f.render_widget(paragraph, chunks[0]);
+
+                            // Status line with controls
+                            let status = Paragraph::new(Line::from(vec![
+                                Span::styled("[ENTER]", Style::default().fg(Color::Cyan)),
+                                Span::raw(" Skip Animation  "),
+                                Span::styled("[Q]", Style::default().fg(Color::Cyan)),
+                                Span::raw(" Quit"),
+                            ]))
+                            .alignment(Alignment::Center)
+                            .style(Style::default().fg(Color::White));
+                            f.render_widget(status, chunks[1]);
+                        })?;
+                        return Ok(());
+                    }
+                    KeyCode::Char('q') | KeyCode::Char('Q') => {
+                        // Exit application
+                        std::process::exit(0);
+                    }
+                    _ => {}
+                }
+            }
+        }
+
         tokio::time::sleep(tokio::time::Duration::from_millis(frame_delay)).await;
     }
 
-    // Final pause before main interface (only if root)
+    // Final pause with all content visible
     if is_root {
-        tokio::time::sleep(tokio::time::Duration::from_millis(1500)).await;
+        // Success case: pause 1 second with all content visible
+        // Check for input during final pause
+        if let Some(key) = check_animation_input() {
+            match key {
+                KeyCode::Enter => {
+                    // Skip final pause
+                    return Ok(());
+                }
+                KeyCode::Char('q') | KeyCode::Char('Q') => {
+                    // Exit application
+                    std::process::exit(0);
+                }
+                _ => {}
+            }
+        }
+        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
     } else {
-        // Longer pause for error message so user can read it
-        tokio::time::sleep(tokio::time::Duration::from_millis(4000)).await;
+        // Error case: add "PRESS ENTER TO EXIT" prompt and wait for input
+        // First, update the display to show the prompt
+        let mut error_frame = final_frames.last().unwrap().clone();
+        error_frame.push(Line::from(vec![]));
+        error_frame.push(Line::from(vec![Span::styled("> PRESS ENTER TO EXIT", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))]));
+
+        terminal.draw(|f| {
+            let size = f.size();
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Min(10), // Main animation area
+                    Constraint::Length(1), // Status line
+                ])
+                .split(size);
+
+            // Main animation content
+            let paragraph = Paragraph::new(error_frame)
+                .alignment(Alignment::Center)
+                .block(Block::default().borders(Borders::NONE));
+            f.render_widget(paragraph, chunks[0]);
+
+            // Status line with controls
+            let status = Paragraph::new(Line::from(vec![
+                Span::styled("[ENTER]", Style::default().fg(Color::Cyan)),
+                Span::raw(" Skip Animation  "),
+                Span::styled("[Q]", Style::default().fg(Color::Cyan)),
+                Span::raw(" Quit"),
+            ]))
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(Color::White));
+            f.render_widget(status, chunks[1]);
+        })?;
+
+        // Wait for user to press Enter (we'll handle this in main.rs)
+        // For now, just pause for 5 seconds as requested
+        tokio::time::sleep(tokio::time::Duration::from_millis(5000)).await;
     }
 
     Ok(())
