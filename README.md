@@ -1,23 +1,62 @@
-# Agent_Manip
+# Telemetry Daemon Manager
 
-A Rust-based GUI application for managing and monitoring the agent. Main goal is to provide a similar experience to the current utils SystrackSQL and LogView but for MacOS and Linux. Compatability with windows would be a plus but not the main goal.
+A terminal-based TUI application for monitoring and managing a Rust-based telemetry daemon. Built using the ratatui library, this tool provides real-time insights into the daemon's resource usage, connection status, and operational state, while offering management capabilities to start, stop, and troubleshoot the telemetry agent.
 
-## Planned features
+## Features
 
-- Real-time log monitoring with automatic updates
-- Database management
-  - Basic ops like reads and writes
-  - Automatic string id mapping
-- Efficient log file parsing and display
-- Status monitoring of the agent
-- Agent controls
-  - Start
-  - Stop
-  - Read config
-  - Inventory
-  - Condense
-- Agent statistics at a glance
-  - avg cpu in past x time
+- **Real-time Process Monitoring**: CPU, memory, disk I/O, and network usage tracking
+- **Daemon Management**: Start, stop, and restart telemetry daemons
+- **Connection Monitoring**: WebSocket connection status and health metrics
+- **Network Traffic Analysis**: Data flow verification and traffic statistics
+- **Tabbed Interface**: Overview, Resources, Network, Logs, and Settings views
+- **Keyboard Navigation**: Intuitive shortcuts for all operations
+
+## Prerequisites
+
+- Rust 1.85.0 or higher
+- Cargo package manager
+
+## Installation
+
+1. Clone the repository:
+```bash
+git clone <repository-url>
+cd telemetry-daemon-manager
+```
+
+2. Build the application:
+```bash
+cargo build --release
+```
+
+The compiled binary will be available in `target/release/telemetry-daemon-manager`
+
+## Usage
+
+1. Run the application:
+```bash
+./target/release/telemetry-daemon-manager
+```
+
+### Keyboard Shortcuts
+
+- `F1-F5`: Switch between tabs (Overview, Resources, Network, Logs, Settings)
+- `Tab`: Cycle through tabs
+- `S`: Start daemon
+- `X`: Stop daemon
+- `R`: Manual refresh
+- `Q` or `Esc`: Quit application
+
+## Architecture
+
+The application consists of several key modules:
+
+- **Main**: Terminal setup and event loop
+- **App**: Application state and event handling
+- **Daemon**: Process monitoring and daemon management
+- **Network**: WebSocket connection and traffic monitoring
+- **UI**: Terminal user interface rendering
+- **Error**: Custom error types and handling
   - Errors in past x time
   - iops 
 - Configuration monitoring and overriding
@@ -32,7 +71,7 @@ A Rust-based GUI application for managing and monitoring the agent. Main goal is
 1. Clone the repository:
 ```bash
 git clone <repository-url>
-cd agent_manip
+cd telemetry-daemon-manager
 ```
 
 2. Build the application:
