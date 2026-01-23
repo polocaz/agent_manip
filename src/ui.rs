@@ -561,12 +561,12 @@ fn draw_title(f: &mut Frame, area: Rect) {
         ]),
         Line::from(vec![
             Span::styled("║", Style::default().fg(Color::Green)),
-            Span::styled("                          LSI AGENT MANAGEMENT TERMINAL                          ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+            Span::styled("                         LSI AGENT MANAGEMENT TERMINAL                        ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
             Span::styled("║", Style::default().fg(Color::Green)),
         ]),
         Line::from(vec![
             Span::styled("║", Style::default().fg(Color::Green)),
-            Span::styled("                        [PIP-BOY INTERFACE v2.1.7]                        ", Style::default().fg(Color::Green)),
+            Span::styled("                          [PIP-BOY INTERFACE v2.1.7]                          ", Style::default().fg(Color::Green)),
             Span::styled("║", Style::default().fg(Color::Green)),
         ]),
         Line::from(vec![
@@ -649,11 +649,79 @@ fn draw_overview(f: &mut Frame, area: Rect, app: &mut App) {
 
     f.render_widget(status, chunks[0]);
 
-    // Key metrics
+    // Key metrics with Pip-Boy style visualizer
     let stats = app.daemon_manager.get_process_stats();
     let conn_status = app.network_monitor.get_connection_status();
     let net_stats = app.network_monitor.get_network_stats();
 
+    // Split metrics area horizontally: left = visualizer, right = textual metrics
+    let metric_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Length(18), // visualizer area
+            Constraint::Min(10),     // textual metrics
+        ])
+        .split(chunks[1]);
+
+    // Visualizer: vertical bars for CPU / MEM / NET with moving scanline
+    let bar_height = 5usize;
+    let cpu_fill = ((stats.cpu_usage.min(100.0) / 100.0) * (bar_height as f32)).round() as usize;
+    // Memory: use process memory vs system total if available
+    let mem_fill = if stats.system_memory_total > 0 {
+        let pct = (stats.system_memory_used as f32 / stats.system_memory_total as f32).min(1.0);
+        (pct * (bar_height as f32)).round() as usize
+    } else {
+        0
+    };
+    let net_fill = if net_stats.data_flow_active { bar_height } else { 0 };
+
+    // Compute a scanline position based on current time for animation
+    let millis = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+    let scan_cycle = (millis / 120) as usize; // speed
+    let scan_pos = (scan_cycle % (bar_height * 2)).min(bar_height - 1);
+
+    let mut viz_lines: Vec<String> = Vec::new();
+    for row in (0..bar_height).rev() {
+        let mut line = String::new();
+
+        // CPU column
+        if row < cpu_fill { line.push_str("█"); } else { line.push_str(" "); }
+        line.push(' ');
+
+        // MEM column
+        if row < mem_fill { line.push_str("█"); } else { line.push_str(" "); }
+        line.push(' ');
+
+        // NET column
+        if row < net_fill { line.push_str("█"); } else { line.push_str(" "); }
+
+        // Add scanline marker overlay
+        if row == scan_pos {
+            // replace spaces with a dim dot to simulate scan
+            line = line.chars().map(|c| {
+                if c == ' ' { '·' } else { c }
+            }).collect();
+        }
+
+        viz_lines.push(line);
+    }
+
+    // Build visualizer block with labels
+    let mut viz_text = String::new();
+    viz_text.push_str(" CPU MEM NET\n");
+    for l in &viz_lines { viz_text.push_str(l); viz_text.push('\n'); }
+
+    let viz = Paragraph::new(viz_text)
+        .style(Style::default().fg(Color::Green))
+        .block(Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Green))
+            .title(" SCANNER ")
+            .title_style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)));
+
+    f.render_widget(viz, metric_chunks[0]);
+
+    // Textual metrics on the right
     let metrics_text = vec![
         Line::from(vec![
             Span::styled("CPU USAGE: ", Style::default().fg(Color::Green)),
@@ -686,7 +754,7 @@ fn draw_overview(f: &mut Frame, area: Rect, app: &mut App) {
             .title(" CORE METRICS ")
             .title_style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)));
 
-    f.render_widget(metrics, chunks[1]);
+    f.render_widget(metrics, metric_chunks[1]);
 
     // Recent events - show systemctl status if available
     let events_text = if app.daemon_manager.is_using_systemctl() {
