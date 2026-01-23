@@ -2,7 +2,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Gauge, Paragraph, Tabs, Wrap},
+    widgets::{Block, Borders, Paragraph, Tabs, Wrap},
     Frame,
 };
 
@@ -163,55 +163,76 @@ fn draw_resources(f: &mut Frame, area: Rect, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3), // CPU
+            Constraint::Length(3), // CPU & System Load
             Constraint::Length(3), // Memory
-            Constraint::Length(3), // Threads & File Handles
-            Constraint::Min(1),    // Details
+            Constraint::Length(3), // I/O Stats
+            Constraint::Length(5), // Process Details
+            Constraint::Min(1),    // Additional Info
         ])
         .split(area);
 
     let stats = app.daemon_manager.get_process_stats();
 
-    // CPU usage gauge
-    let cpu_gauge = Gauge::default()
-        .block(Block::default().borders(Borders::ALL).title("CPU Usage"))
-        .gauge_style(Style::default().fg(Color::Cyan))
-        .percent((stats.cpu_usage / 100.0 * 100.0) as u16)
-        .label(format!("{:.1}%", stats.cpu_usage));
+    // CPU usage and System Load
+    let cpu_load_text = format!("CPU: {:.1}% | System Load: {:.2}",
+        stats.cpu_usage,
+        stats.system_load_avg
+    );
+    let cpu_load = Paragraph::new(cpu_load_text)
+        .block(Block::default().borders(Borders::ALL).title("CPU & Load"));
 
-    f.render_widget(cpu_gauge, chunks[0]);
+    f.render_widget(cpu_load, chunks[0]);
 
-    // Memory usage
-    let memory_text = format!("Memory: {} | Virtual: {}",
+    // Memory usage (Process and System)
+    let memory_text = format!("Process: {} | Virtual: {}\nSystem: {} / {}",
         format_memory(stats.memory_usage),
-        format_memory(stats.virtual_memory)
+        format_memory(stats.virtual_memory),
+        format_memory(stats.system_memory_used),
+        format_memory(stats.system_memory_total)
     );
     let memory = Paragraph::new(memory_text)
         .block(Block::default().borders(Borders::ALL).title("Memory"));
 
     f.render_widget(memory, chunks[1]);
 
-    // Threads and File Handles
-    let threads_files_text = format!("Threads: {} | File Handles: {}",
-        stats.thread_count,
-        stats.open_files
+    // I/O Statistics
+    let io_text = format!("Disk Read: {} | Write: {}\nNet RX: {} | TX: {}",
+        format_bytes(stats.disk_read_bytes),
+        format_bytes(stats.disk_write_bytes),
+        format_bytes(stats.network_rx_bytes),
+        format_bytes(stats.network_tx_bytes)
     );
-    let threads_files = Paragraph::new(threads_files_text)
-        .block(Block::default().borders(Borders::ALL).title("Threads & Files"));
+    let io_stats = Paragraph::new(io_text)
+        .block(Block::default().borders(Borders::ALL).title("I/O Stats"));
 
-    f.render_widget(threads_files, chunks[2]);
+    f.render_widget(io_stats, chunks[2]);
 
-    // Additional details
-    let details_text = format!("Process: {}\nPID: {:?}\nUptime: {}s\nStart Time: {}",
+    // Process Details
+    let details_text = format!("Process: {}\nPID: {:?} | PPID: {:?}\nState: {} | Priority: {}\nThreads: {} | Files: {}\nUptime: {}s",
         app.daemon_manager.get_process_name(),
         stats.pid,
-        stats.uptime_seconds,
-        format_timestamp(stats.start_time)
+        stats.ppid,
+        stats.state,
+        stats.priority,
+        stats.thread_count,
+        stats.open_files,
+        stats.uptime_seconds
     );
     let details = Paragraph::new(details_text)
         .block(Block::default().borders(Borders::ALL).title("Process Details"));
 
     f.render_widget(details, chunks[3]);
+
+    // Additional Info
+    let additional_text = format!("Start Time: {}\nContext Switches: {}\nPage Faults: {}",
+        format_timestamp(stats.start_time),
+        stats.context_switches,
+        stats.page_faults
+    );
+    let additional = Paragraph::new(additional_text)
+        .block(Block::default().borders(Borders::ALL).title("Additional Info"));
+
+    f.render_widget(additional, chunks[4]);
 }
 
 fn draw_network(f: &mut Frame, area: Rect, app: &App) {

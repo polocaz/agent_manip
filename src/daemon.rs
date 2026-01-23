@@ -37,6 +37,19 @@ pub struct ProcessStats {
     pub start_time: u64,
     pub uptime_seconds: u64,
     pub open_files: usize, // Number of open file descriptors
+    // Additional metrics
+    pub disk_read_bytes: u64,
+    pub disk_write_bytes: u64,
+    pub network_rx_bytes: u64,
+    pub network_tx_bytes: u64,
+    pub context_switches: u64,
+    pub page_faults: u64,
+    pub system_load_avg: f32,
+    pub system_memory_total: u64, // in KB
+    pub system_memory_used: u64, // in KB
+    pub ppid: Option<u32>,
+    pub priority: i32,
+    pub state: String,
 }
 
 impl Default for ProcessStats {
@@ -50,6 +63,19 @@ impl Default for ProcessStats {
             start_time: 0,
             uptime_seconds: 0,
             open_files: 0,
+            // Additional metrics
+            disk_read_bytes: 0,
+            disk_write_bytes: 0,
+            network_rx_bytes: 0,
+            network_tx_bytes: 0,
+            context_switches: 0,
+            page_faults: 0,
+            system_load_avg: 0.0,
+            system_memory_total: 0,
+            system_memory_used: 0,
+            ppid: None,
+            priority: 0,
+            state: "Unknown".to_string(),
         }
     }
 }
@@ -127,12 +153,13 @@ impl DaemonManager {
         self.state = match self.current_pid {
             Some(pid) => {
                 if let Some(process) = system.process(sysinfo::Pid::from_u32(pid)) {
+                    let disk_usage = process.disk_usage();
                     self.process_stats = ProcessStats {
                         pid: Some(pid),
                         cpu_usage: process.cpu_usage(),
                         memory_usage: process.memory() / 1024, // Convert to KB
                         virtual_memory: process.virtual_memory() / 1024, // Convert to KB
-                        thread_count: 0, // TODO: Implement thread count properly
+                        thread_count: 0, // TODO: thread_count not directly available in sysinfo
                         start_time: process.start_time(),
                         uptime_seconds: std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
@@ -140,6 +167,19 @@ impl DaemonManager {
                             .as_secs()
                             .saturating_sub(process.start_time()),
                         open_files: get_open_file_count(pid),
+                        // Additional metrics
+                        disk_read_bytes: disk_usage.total_read_bytes,
+                        disk_write_bytes: disk_usage.total_written_bytes,
+                        network_rx_bytes: 0, // TODO: Network stats per process not easily available
+                        network_tx_bytes: 0, // TODO: Network stats per process not easily available
+                        context_switches: 0, // TODO: Context switches not available in sysinfo
+                        page_faults: 0, // TODO: Page faults not available in sysinfo
+                        system_load_avg: sysinfo::System::load_average().one as f32,
+                        system_memory_total: system.total_memory() / 1024, // Convert to KB
+                        system_memory_used: system.used_memory() / 1024, // Convert to KB
+                        ppid: process.parent().map(|p| p.as_u32()),
+                        priority: 0, // TODO: priority not available in sysinfo
+                        state: format!("{:?}", process.status()),
                     };
                     DaemonState::Running
                 } else {
