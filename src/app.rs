@@ -48,6 +48,9 @@ pub struct App {
     pub last_update: Instant,
     pub refresh_rate: Duration,
     pub config_scroll: u16, // Scroll position for config tab
+    pub logs_scroll: u16,   // Scroll position for logs tab
+    pub current_log_file: usize, // Current log file index (0-9)
+    pub last_log_content_len: usize, // Track log content length for auto-scroll
 }
 
 impl App {
@@ -60,6 +63,9 @@ impl App {
             last_update: Instant::now(),
             refresh_rate: Duration::from_millis(1000), // 1 second refresh
             config_scroll: 0,
+            logs_scroll: 0,
+            current_log_file: 0,
+            last_log_content_len: 0,
         })
     }
 
@@ -94,20 +100,88 @@ impl App {
                 self.last_update = Instant::now() - self.refresh_rate;
             }
             KeyCode::Up => {
-                if self.config_scroll > 0 {
-                    self.config_scroll = self.config_scroll.saturating_sub(1);
+                match self.current_tab {
+                    Tab::Config => {
+                        if self.config_scroll > 0 {
+                            self.config_scroll = self.config_scroll.saturating_sub(1);
+                        }
+                    }
+                    Tab::Logs => {
+                        if self.logs_scroll > 0 {
+                            self.logs_scroll = self.logs_scroll.saturating_sub(1);
+                        }
+                    }
+                    _ => {}
                 }
             }
             KeyCode::Down => {
-                self.config_scroll += 1; // Will be clamped in the UI
+                match self.current_tab {
+                    Tab::Config => {
+                        self.config_scroll += 1; // Will be clamped in the UI
+                    }
+                    Tab::Logs => {
+                        self.logs_scroll += 1; // Will be clamped in the UI
+                    }
+                    _ => {}
+                }
             }
             KeyCode::PageUp => {
-                if self.config_scroll > 0 {
-                    self.config_scroll = self.config_scroll.saturating_sub(10);
+                match self.current_tab {
+                    Tab::Config => {
+                        if self.config_scroll > 0 {
+                            self.config_scroll = self.config_scroll.saturating_sub(10);
+                        }
+                    }
+                    Tab::Logs => {
+                        if self.logs_scroll > 0 {
+                            self.logs_scroll = self.logs_scroll.saturating_sub(10);
+                        }
+                    }
+                    _ => {}
                 }
             }
             KeyCode::PageDown => {
-                self.config_scroll += 10; // Will be clamped in the UI
+                match self.current_tab {
+                    Tab::Config => {
+                        self.config_scroll += 10; // Will be clamped in the UI
+                    }
+                    Tab::Logs => {
+                        self.logs_scroll += 10; // Will be clamped in the UI
+                    }
+                    _ => {}
+                }
+            }
+            KeyCode::Left => {
+                if self.current_tab == Tab::Logs && self.current_log_file > 0 {
+                    self.current_log_file -= 1;
+                    self.logs_scroll = 0; // Reset scroll when switching files
+                    self.last_log_content_len = 0; // Reset content tracking for new file
+                }
+            }
+            KeyCode::Right => {
+                if self.current_tab == Tab::Logs && self.current_log_file < 9 {
+                    self.current_log_file += 1;
+                    self.logs_scroll = 0; // Reset scroll when switching files
+                    self.last_log_content_len = 0; // Reset content tracking for new file
+                }
+            }
+            KeyCode::Char('1') | KeyCode::Char('2') | KeyCode::Char('3') | KeyCode::Char('4') | KeyCode::Char('5') | KeyCode::Char('6') | KeyCode::Char('7') | KeyCode::Char('8') | KeyCode::Char('9') => {
+                if self.current_tab == Tab::Logs {
+                    if let KeyCode::Char(c) = key.code {
+                        if let Some(digit) = c.to_digit(10) {
+                            self.current_log_file = digit as usize;
+                            self.logs_scroll = 0; // Reset scroll when switching files
+                            self.last_log_content_len = 0; // Reset content tracking for new file
+                        }
+                    }
+                }
+            }
+            KeyCode::Char('0') => {
+                if self.current_tab == Tab::Logs {
+                    self.current_log_file = 0;
+                    self.logs_scroll = 0; // Reset scroll when switching files
+                    self.last_log_content_len = 0; // Reset content tracking for new file
+                }
             }
             _ => {}
         }

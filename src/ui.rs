@@ -10,6 +10,7 @@ use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode};
 
 use crate::app::{App, Tab};
+use std::path::PathBuf;
 
 /// Check for keyboard input during animation
 /// Returns Some(KeyCode) if a key was pressed, None otherwise
@@ -20,6 +21,30 @@ fn check_animation_input() -> Option<KeyCode> {
         }
     }
     None
+}
+
+/// Get the log file path based on platform and log file index
+fn get_log_file_path(log_index: usize) -> PathBuf {
+    #[cfg(target_os = "linux")]
+    {
+        PathBuf::from(format!("/var/opt/lsiagent/lsiagent{}.log", log_index))
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        PathBuf::from("/Library/Application Support/Lakeside Software/lsiagent.log")
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        PathBuf::from(format!("C:\\Program Files\\Lakeside Software\\LsiAgent{}.log", log_index))
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+    {
+        // Fallback for other platforms
+        PathBuf::from(format!("/var/log/lsiagent{}.log", log_index))
+    }
 }
 
 pub async fn show_startup_animation(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> Result<()> {
@@ -479,7 +504,7 @@ fn draw_title(f: &mut Frame, area: Rect) {
     f.render_widget(title, area);
 }
 
-fn draw_tabs(f: &mut Frame, area: Rect, app: &App) {
+fn draw_tabs(f: &mut Frame, area: Rect, app: &mut App) {
     let tab_titles = vec!["[OVERVIEW]", "[RESOURCES]", "[NETWORK]", "[LOGS]", "[CONFIG]", "[SETTINGS]"];
 
     let tabs = Tabs::new(tab_titles)
@@ -502,7 +527,7 @@ fn draw_tabs(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(tabs, area);
 }
 
-fn draw_main_content(f: &mut Frame, area: Rect, app: &App) {
+fn draw_main_content(f: &mut Frame, area: Rect, app: &mut App) {
     match app.current_tab {
         Tab::Overview => draw_overview(f, area, app),
         Tab::Resources => draw_resources(f, area, app),
@@ -513,7 +538,7 @@ fn draw_main_content(f: &mut Frame, area: Rect, app: &App) {
     }
 }
 
-fn draw_overview(f: &mut Frame, area: Rect, app: &App) {
+fn draw_overview(f: &mut Frame, area: Rect, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -612,7 +637,7 @@ fn draw_overview(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(events, chunks[2]);
 }
 
-fn draw_resources(f: &mut Frame, area: Rect, app: &App) {
+fn draw_resources(f: &mut Frame, area: Rect, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -713,7 +738,7 @@ fn draw_resources(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(additional, chunks[4]);
 }
 
-fn draw_network(f: &mut Frame, area: Rect, app: &App) {
+fn draw_network(f: &mut Frame, area: Rect, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -773,20 +798,57 @@ fn draw_network(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(details, chunks[2]);
 }
 
-fn draw_logs(f: &mut Frame, area: Rect, _app: &App) {
-    let logs = Paragraph::new("LOG VIEWER WILL BE IMPLEMENTED HERE...\n\nUSE ARROW KEYS TO SCROLL\nPRESS 'F' TO FILTER LOGS")
+fn draw_logs(f: &mut Frame, area: Rect, app: &mut App) {
+    let log_path = get_log_file_path(app.current_log_file);
+    let log_content = match std::fs::read_to_string(&log_path) {
+        Ok(content) => {
+            if content.is_empty() {
+                format!("LOG FILE IS EMPTY\n\nPATH: {}\n\nThe log file exists but contains no content.", log_path.display())
+            } else {
+                content
+            }
+        }
+        Err(e) => {
+            format!("UNABLE TO READ LOG FILE\n\nPATH: {}\n\nERROR: {}\n\nPossible causes:\n• File does not exist\n• Insufficient permissions\n• Daemon not installed\n\nTry running with elevated privileges or check installation.", log_path.display(), e)
+        }
+    };
+
+    // Check if log content has grown (new logs added)
+    let current_content_len = log_content.len();
+    if current_content_len > app.last_log_content_len && app.current_tab == Tab::Logs {
+        // Content has grown, auto-scroll to bottom
+        // Calculate visible height (area height minus borders)
+        let visible_height = (area.height as usize).saturating_sub(2); // Subtract borders
+        let content_lines = log_content.lines().count();
+        
+        // Set scroll to show the bottom of the content
+        if content_lines > visible_height {
+            app.logs_scroll = (content_lines - visible_height) as u16;
+        } else {
+            app.logs_scroll = 0;
+        }
+    }
+    
+    // Update the last known content length
+    app.last_log_content_len = current_content_len;
+
+    // Create title with current log file info
+    let title = format!(" LOG FILE {}: {} ", app.current_log_file, log_path.file_name().unwrap_or_default().to_string_lossy());
+
+    let logs = Paragraph::new(log_content)
         .style(Style::default().fg(Color::Green))
         .wrap(Wrap { trim: true })
+        .scroll((app.logs_scroll, 0))
         .block(Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Green))
-            .title(" SYSTEM LOGS ")
+            .title(title)
             .title_style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)));
 
     f.render_widget(logs, area);
 }
 
-fn draw_config(f: &mut Frame, area: Rect, app: &App) {
+fn draw_config(f: &mut Frame, area: Rect, app: &mut App) {
     let config_content = match std::fs::read_to_string("/var/opt/lsiagent/lsiagent.cfg") {
         Ok(content) => content,
         Err(_) => "CONFIG FILE NOT FOUND OR ACCESS DENIED\n\nPATH: /var/opt/lsiagent/lsiagent.cfg\n\nThis file contains LSI Agent configuration settings.\nEnsure the daemon is properly installed and you have read permissions.\n\nYou can also check the example config file at: ./example/lsiagent.cfg".to_string(),
@@ -805,7 +867,7 @@ fn draw_config(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(config, area);
 }
 
-fn draw_settings(f: &mut Frame, area: Rect, _app: &App) {
+fn draw_settings(f: &mut Frame, area: Rect, _app: &mut App) {
     let settings = Paragraph::new("SETTINGS WILL BE IMPLEMENTED HERE...\n\n- REFRESH RATE\n- ALERT THRESHOLDS\n- DAEMON CONFIGURATION\n- NETWORK ENDPOINTS")
         .style(Style::default().fg(Color::Green))
         .block(Block::default()
@@ -817,7 +879,7 @@ fn draw_settings(f: &mut Frame, area: Rect, _app: &App) {
     f.render_widget(settings, area);
 }
 
-fn draw_status_bar(f: &mut Frame, area: Rect, app: &App) {
+fn draw_status_bar(f: &mut Frame, area: Rect, app: &mut App) {
     let management_type = if app.daemon_manager.is_using_systemctl() {
         "SYSTEMCTL"
     } else {
@@ -832,6 +894,7 @@ fn draw_status_bar(f: &mut Frame, area: Rect, app: &App) {
 
     let status_text = match app.current_tab {
         Tab::Config => format!("{} | [↑/↓] SCROLL | [PgUp/PgDn] PAGE ", base_status),
+        Tab::Logs => format!("{} | [↑/↓] SCROLL | [PgUp/PgDn] PAGE | [←/→] LOG FILE | [0-9] SELECT FILE ", base_status),
         _ => base_status,
     };
 

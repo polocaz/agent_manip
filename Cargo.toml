@@ -1,8 +1,8 @@
 [package]
-name = "telemetry-daemon-manager"
+name = "lsman"
 version = "0.1.0"
 edition = "2021"
-description = "A terminal-based TUI application for monitoring and managing a Rust-based telemetry daemon"
+description = "A terminal-based TUI application for monitoring and managing the LsiAgent"
 
 [dependencies]
 # TUI Framework
