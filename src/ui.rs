@@ -23,6 +23,69 @@ fn check_animation_input() -> Option<KeyCode> {
     None
 }
 
+/// Get cached log content, updating cache if file has changed
+/// Limits content to last MAX_LOG_LINES for performance
+fn get_cached_log_content(log_path: &std::path::Path, log_index: usize, cache: &mut std::collections::HashMap<usize, crate::app::CachedLog>) -> (String, bool) {
+    const MAX_LOG_LINES: usize = 1000; // Limit to last 1000 lines for performance
+    
+    // Check if we have cached content
+    if let Some(cached) = cache.get(&log_index) {
+        // Check if file still exists and hasn't been modified
+        if let Ok(metadata) = std::fs::metadata(log_path) {
+            if let Ok(modified) = metadata.modified() {
+                // If file hasn't changed, use cached content
+                if modified == cached.modified {
+                    return (cached.content.clone(), false); // false = no change
+                }
+            }
+        }
+    }
+    
+    // File doesn't exist in cache or has been modified, read it
+    let full_content = match std::fs::read_to_string(log_path) {
+        Ok(content) => content,
+        Err(e) => {
+            return (format!("UNABLE TO READ LOG FILE\n\nPATH: {}\n\nERROR: {}\n\nPossible causes:\n• File does not exist\n• Insufficient permissions\n• Daemon not installed\n\nTry running with elevated privileges or check installation.", log_path.display(), e), true);
+        }
+    };
+    
+    // Process content: limit to last MAX_LOG_LINES and handle empty files
+    let content = if full_content.is_empty() {
+        format!("LOG FILE IS EMPTY\n\nPATH: {}\n\nThe log file exists but contains no content.", log_path.display())
+    } else {
+        // Split into lines and take the last MAX_LOG_LINES
+        let lines: Vec<&str> = full_content.lines().collect();
+        let start_idx = if lines.len() > MAX_LOG_LINES {
+            lines.len() - MAX_LOG_LINES
+        } else {
+            0
+        };
+        
+        let limited_lines = &lines[start_idx..];
+        let limited_content = limited_lines.join("\n");
+        
+        // Add a note if content was truncated
+        if lines.len() > MAX_LOG_LINES {
+            format!("... (showing last {} of {} lines)\n\n{}", MAX_LOG_LINES, lines.len(), limited_content)
+        } else {
+            limited_content
+        }
+    };
+    let displayed_line_count = content.lines().count();
+    
+    let modified = std::fs::metadata(log_path)
+        .and_then(|m| m.modified())
+        .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+    
+    cache.insert(log_index, crate::app::CachedLog {
+        content: content.clone(),
+        modified,
+        line_count: displayed_line_count, // Use displayed line count for scrolling
+    });
+    
+    (content, true) // true = content changed
+}
+
 /// Get the log file path based on platform and log file index
 fn get_log_file_path(log_index: usize) -> PathBuf {
     #[cfg(target_os = "linux")]
@@ -800,26 +863,23 @@ fn draw_network(f: &mut Frame, area: Rect, app: &mut App) {
 
 fn draw_logs(f: &mut Frame, area: Rect, app: &mut App) {
     let log_path = get_log_file_path(app.current_log_file);
-    let log_content = match std::fs::read_to_string(&log_path) {
-        Ok(content) => {
-            if content.is_empty() {
-                format!("LOG FILE IS EMPTY\n\nPATH: {}\n\nThe log file exists but contains no content.", log_path.display())
-            } else {
-                content
-            }
-        }
-        Err(e) => {
-            format!("UNABLE TO READ LOG FILE\n\nPATH: {}\n\nERROR: {}\n\nPossible causes:\n• File does not exist\n• Insufficient permissions\n• Daemon not installed\n\nTry running with elevated privileges or check installation.", log_path.display(), e)
-        }
-    };
-
-    // Check if log content has grown (new logs added)
+    
+    // Get or update cached log content
+    let (log_content, content_changed) = get_cached_log_content(&log_path, app.current_log_file, &mut app.log_cache);
+    
+    // Check if log content has grown (new logs added) for auto-scroll
     let current_content_len = log_content.len();
-    if current_content_len > app.last_log_content_len && app.current_tab == Tab::Logs {
+    if content_changed && current_content_len > app.last_log_content_len && app.current_tab == Tab::Logs {
         // Content has grown, auto-scroll to bottom
         // Calculate visible height (area height minus borders)
         let visible_height = (area.height as usize).saturating_sub(2); // Subtract borders
-        let content_lines = log_content.lines().count();
+        
+        // Get line count from cache if available
+        let content_lines = if let Some(cached) = app.log_cache.get(&app.current_log_file) {
+            cached.line_count
+        } else {
+            log_content.lines().count()
+        };
         
         // Set scroll to show the bottom of the content
         if content_lines > visible_height {
@@ -829,8 +889,28 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &mut App) {
         }
     }
     
-    // Update the last known content length
-    app.last_log_content_len = current_content_len;
+    // Update the last known content length only if content changed
+    if content_changed {
+        app.last_log_content_len = current_content_len;
+    }
+
+    // Clamp scroll position to valid bounds
+    let visible_height = (area.height as usize).saturating_sub(2);
+    let content_lines = if let Some(cached) = app.log_cache.get(&app.current_log_file) {
+        cached.line_count
+    } else {
+        log_content.lines().count()
+    };
+    
+    let max_scroll = if content_lines > visible_height {
+        content_lines - visible_height
+    } else {
+        0
+    };
+    
+    if app.logs_scroll > max_scroll as u16 {
+        app.logs_scroll = max_scroll as u16;
+    }
 
     // Create title with current log file info
     let title = format!(" LOG FILE {}: {} ", app.current_log_file, log_path.file_name().unwrap_or_default().to_string_lossy());

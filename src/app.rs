@@ -51,6 +51,14 @@ pub struct App {
     pub logs_scroll: u16,   // Scroll position for logs tab
     pub current_log_file: usize, // Current log file index (0-9)
     pub last_log_content_len: usize, // Track log content length for auto-scroll
+    pub log_cache: std::collections::HashMap<usize, CachedLog>, // Cache log content per file
+}
+
+#[derive(Clone)]
+pub struct CachedLog {
+    pub content: String,
+    pub modified: std::time::SystemTime,
+    pub line_count: usize,
 }
 
 impl App {
@@ -66,6 +74,7 @@ impl App {
             logs_scroll: 0,
             current_log_file: 0,
             last_log_content_len: 0,
+            log_cache: std::collections::HashMap::new(),
         })
     }
 
@@ -120,7 +129,9 @@ impl App {
                         self.config_scroll += 1; // Will be clamped in the UI
                     }
                     Tab::Logs => {
-                        self.logs_scroll += 1; // Will be clamped in the UI
+                        // For logs, we can't easily calculate bounds here, so allow increment
+                        // It will be clamped in draw_logs
+                        self.logs_scroll += 1;
                     }
                     _ => {}
                 }
@@ -146,7 +157,9 @@ impl App {
                         self.config_scroll += 10; // Will be clamped in the UI
                     }
                     Tab::Logs => {
-                        self.logs_scroll += 10; // Will be clamped in the UI
+                        // For logs, we can't easily calculate bounds here, so allow increment
+                        // It will be clamped in draw_logs
+                        self.logs_scroll += 10;
                     }
                     _ => {}
                 }
@@ -156,6 +169,7 @@ impl App {
                     self.current_log_file -= 1;
                     self.logs_scroll = 0; // Reset scroll when switching files
                     self.last_log_content_len = 0; // Reset content tracking for new file
+                    // Cache will be invalidated automatically when we try to read a different file
                 }
             }
             KeyCode::Right => {
@@ -163,6 +177,7 @@ impl App {
                     self.current_log_file += 1;
                     self.logs_scroll = 0; // Reset scroll when switching files
                     self.last_log_content_len = 0; // Reset content tracking for new file
+                    // Cache will be invalidated automatically when we try to read a different file
                 }
             }
             KeyCode::Char('1') | KeyCode::Char('2') | KeyCode::Char('3') | KeyCode::Char('4') | KeyCode::Char('5') | KeyCode::Char('6') | KeyCode::Char('7') | KeyCode::Char('8') | KeyCode::Char('9') => {
@@ -172,6 +187,7 @@ impl App {
                             self.current_log_file = digit as usize;
                             self.logs_scroll = 0; // Reset scroll when switching files
                             self.last_log_content_len = 0; // Reset content tracking for new file
+                            // Cache will be invalidated automatically when we try to read a different file
                         }
                     }
                 }
@@ -181,6 +197,7 @@ impl App {
                     self.current_log_file = 0;
                     self.logs_scroll = 0; // Reset scroll when switching files
                     self.last_log_content_len = 0; // Reset content tracking for new file
+                    // Cache will be invalidated automatically when we try to read a different file
                 }
             }
             _ => {}
