@@ -7,6 +7,7 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
+use libc;
 
 mod app;
 mod daemon;
@@ -30,6 +31,16 @@ async fn main() -> Result<()> {
 
     // Show startup animation
     ui::show_startup_animation(&mut terminal).await?;
+
+    // Check if running as root after animation
+    let is_root = unsafe { libc::geteuid() == 0 };
+    if !is_root {
+        // Restore terminal and exit
+        disable_raw_mode()?;
+        execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+        terminal.show_cursor()?;
+        std::process::exit(1);
+    }
 
     // Create app and run it
     let app = App::new()?;

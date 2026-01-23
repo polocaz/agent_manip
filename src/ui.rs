@@ -14,7 +14,11 @@ pub async fn show_startup_animation(terminal: &mut Terminal<CrosstermBackend<std
     // Clear the screen first
     terminal.clear()?;
 
-    let frames = vec![
+    // Check if running as root
+    let is_root = unsafe { libc::geteuid() == 0 };
+
+    // Define the final complete frames
+    let final_frames = vec![
         // Frame 1: Header
         vec![
             Line::from(vec![Span::styled("[ S Y S T R A C K   S O F T W A R E   ( C ) 2000 ]", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))]),
@@ -42,46 +46,123 @@ pub async fn show_startup_animation(terminal: &mut Terminal<CrosstermBackend<std
             Line::from(vec![Span::styled("  ███████╗███████║██║    ██║  ██║╚██████╔╝███████╗██║ ╚████║   ██║   ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))]),
             Line::from(vec![Span::styled("  ╚══════╝╚══════╝╚═╝    ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝   ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))]),
         ],
-        // Frame 4: Status
-        vec![
-            Line::from(vec![Span::styled("[ S Y S T R A C K   S O F T W A R E   ( C ) 2000 ]", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))]),
-            Line::from(vec![]),
-            Line::from(vec![Span::styled("> INITIALIZING MODULE...", Style::default().fg(Color::Green))]),
-            Line::from(vec![Span::styled("> LOADING: LSI AGENT", Style::default().fg(Color::Green))]),
-            Line::from(vec![]),
-            Line::from(vec![Span::styled("  ██╗     ███████╗██╗     █████╗  ██████╗ ███████╗███╗   ██╗████████╗", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))]),
-            Line::from(vec![Span::styled("  ██║     ██╔════╝██║    ██╔══██╗██╔════╝ ██╔════╝████╗  ██║╚══██╔══╝", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))]),
-            Line::from(vec![Span::styled("  ██║     ███████╗██║    ███████║██║  ███╗█████╗  ██╔██╗ ██║   ██║   ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))]),
-            Line::from(vec![Span::styled("  ██║     ╚════██║██║    ██╔══██║██║   ██║██╔══╝  ██║╚██╗██║   ██║   ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))]),
-            Line::from(vec![Span::styled("  ███████╗███████║██║    ██║  ██║╚██████╔╝███████╗██║ ╚████║   ██║   ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))]),
-            Line::from(vec![Span::styled("  ╚══════╝╚══════╝╚═╝    ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝   ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))]),
-            Line::from(vec![]),
-            Line::from(vec![Span::styled("> STATUS: OPERATIONAL", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))]),
-        ],
+        // Frame 4: Status (different based on permissions)
+        if is_root {
+            vec![
+                Line::from(vec![Span::styled("[ S Y S T R A C K   S O F T W A R E   ( C ) 2000 ]", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))]),
+                Line::from(vec![]),
+                Line::from(vec![Span::styled("> INITIALIZING MODULE...", Style::default().fg(Color::Green))]),
+                Line::from(vec![Span::styled("> LOADING: LSI AGENT", Style::default().fg(Color::Green))]),
+                Line::from(vec![]),
+                Line::from(vec![Span::styled("  ██╗     ███████╗██╗     █████╗  ██████╗ ███████╗███╗   ██╗████████╗", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))]),
+                Line::from(vec![Span::styled("  ██║     ██╔════╝██║    ██╔══██╗██╔════╝ ██╔════╝████╗  ██║╚══██╔══╝", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))]),
+                Line::from(vec![Span::styled("  ██║     ███████╗██║    ███████║██║  ███╗█████╗  ██╔██╗ ██║   ██║   ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))]),
+                Line::from(vec![Span::styled("  ██║     ╚════██║██║    ██╔══██║██║   ██║██╔══╝  ██║╚██╗██║   ██║   ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))]),
+                Line::from(vec![Span::styled("  ███████╗███████║██║    ██║  ██║╚██████╔╝███████╗██║ ╚████║   ██║   ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))]),
+                Line::from(vec![Span::styled("  ╚══════╝╚══════╝╚═╝    ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝   ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))]),
+                Line::from(vec![]),
+                Line::from(vec![Span::styled("> STATUS: OPERATIONAL", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))]),
+            ]
+        } else {
+            vec![
+                Line::from(vec![Span::styled("[ S Y S T R A C K   S O F T W A R E   ( C ) 2000 ]", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))]),
+                Line::from(vec![]),
+                Line::from(vec![Span::styled("> INITIALIZING MODULE...", Style::default().fg(Color::Green))]),
+                Line::from(vec![Span::styled("> LOADING: LSI AGENT", Style::default().fg(Color::Green))]),
+                Line::from(vec![]),
+                Line::from(vec![Span::styled("  ██╗     ███████╗██╗     █████╗  ██████╗ ███████╗███╗   ██╗████████╗", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))]),
+                Line::from(vec![Span::styled("  ██║     ██╔════╝██║    ██╔══██╗██╔════╝ ██╔════╝████╗  ██║╚══██╔══╝", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))]),
+                Line::from(vec![Span::styled("  ██║     ███████╗██║    ███████║██║  ███╗█████╗  ██╔██╗ ██║   ██║   ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))]),
+                Line::from(vec![Span::styled("  ██║     ╚════██║██║    ██╔══██║██║   ██║██╔══╝  ██║╚██╗██║   ██║   ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))]),
+                Line::from(vec![Span::styled("  ███████╗███████║██║    ██║  ██║╚██████╔╝███████╗██║ ╚████║   ██║   ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))]),
+                Line::from(vec![Span::styled("  ╚══════╝╚══════╝╚═╝    ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝   ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))]),
+                Line::from(vec![]),
+                Line::from(vec![Span::styled("> STATUS: INOPERATIONAL", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))]),
+                Line::from(vec![]),
+                Line::from(vec![Span::styled("> ERROR: INSUFFICIENT PERMISSIONS", Style::default().fg(Color::Red))]),
+                Line::from(vec![Span::styled("> TRY LAUNCHING AS ADMIN", Style::default().fg(Color::Red))]),
+            ]
+        },
     ];
 
-    for (i, frame) in frames.iter().enumerate() {
-        terminal.draw(|f| {
-            let size = f.size();
-            let paragraph = Paragraph::new(frame.clone())
-                .alignment(Alignment::Center)
-                .block(Block::default().borders(Borders::NONE));
-            f.render_widget(paragraph, size);
-        })?;
+    // Typing animation for each frame
+    for (frame_index, final_frame) in final_frames.iter().enumerate() {
+        let mut current_frame = vec![];
 
-        // Different delays for different frames
-        let delay = match i {
-            0 => 1500, // Header - longer delay
-            1 => 1000, // Loading message
-            2 => 2000, // ASCII art - longer to show the logo
-            3 => 2000, // Final status - longer to show completion
+        // Copy existing lines from previous frames
+        if frame_index > 0 {
+            current_frame.extend_from_slice(&final_frames[frame_index - 1]);
+        }
+
+        // Find new lines to type
+        let start_line = if frame_index == 0 { 0 } else { final_frames[frame_index - 1].len() };
+        let new_lines = &final_frame[start_line..];
+
+        // Type out new lines character by character
+        for (line_idx, line) in new_lines.iter().enumerate() {
+            let actual_line_idx = start_line + line_idx;
+
+            // Skip empty lines - show them instantly
+            if line.spans.is_empty() || (line.spans.len() == 1 && line.spans[0].content.is_empty()) {
+                current_frame.push(line.clone());
+                continue;
+            }
+
+            // For lines with content, type them out character by character
+            if let Some(span) = line.spans.first() {
+                let text = span.content.as_ref();
+                let chars: Vec<char> = text.chars().collect();
+
+                for char_idx in 0..=chars.len() {
+                    // Build the current line with partial text
+                    let partial_text: String = chars.iter().take(char_idx).collect();
+                    let mut partial_line = line.clone();
+                    if let Some(span_mut) = partial_line.spans.first_mut() {
+                        span_mut.content = partial_text.into();
+                    }
+
+                    // Update the current frame
+                    current_frame.resize(actual_line_idx, Line::from(vec![]));
+                    if actual_line_idx < current_frame.len() {
+                        current_frame[actual_line_idx] = partial_line;
+                    } else {
+                        current_frame.push(partial_line);
+                    }
+
+                    // Draw the current state
+                    terminal.draw(|f| {
+                        let size = f.size();
+                        let paragraph = Paragraph::new(current_frame.clone())
+                            .alignment(Alignment::Center)
+                            .block(Block::default().borders(Borders::NONE));
+                        f.render_widget(paragraph, size);
+                    })?;
+
+                    // Typing delay (faster for ASCII art, slower for status messages)
+                    let char_delay = if frame_index == 2 { 3 } else { 20 }; // ASCII art faster, text slower
+                    tokio::time::sleep(tokio::time::Duration::from_millis(char_delay)).await;
+                }
+            }
+        }
+
+        // Pause after each complete frame
+        let frame_delay = match frame_index {
+            0 => 800, // Header
+            1 => 600, // Loading message
+            2 => 1200, // ASCII art
+            3 => if is_root { 1200 } else { 2500 }, // Final status
             _ => 500,
         };
-        tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(frame_delay)).await;
     }
 
-    // Final pause before main interface
-    tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
+    // Final pause before main interface (only if root)
+    if is_root {
+        tokio::time::sleep(tokio::time::Duration::from_millis(1500)).await;
+    } else {
+        // Longer pause for error message so user can read it
+        tokio::time::sleep(tokio::time::Duration::from_millis(4000)).await;
+    }
 
     Ok(())
 }
@@ -147,7 +228,7 @@ fn draw_title(f: &mut Frame, area: Rect) {
 }
 
 fn draw_tabs(f: &mut Frame, area: Rect, app: &App) {
-    let tab_titles = vec!["[OVERVIEW]", "[RESOURCES]", "[NETWORK]", "[LOGS]", "[SETTINGS]"];
+    let tab_titles = vec!["[OVERVIEW]", "[RESOURCES]", "[NETWORK]", "[LOGS]", "[CONFIG]", "[SETTINGS]"];
 
     let tabs = Tabs::new(tab_titles)
         .select(match app.current_tab {
@@ -155,7 +236,8 @@ fn draw_tabs(f: &mut Frame, area: Rect, app: &App) {
             Tab::Resources => 1,
             Tab::Network => 2,
             Tab::Logs => 3,
-            Tab::Settings => 4,
+            Tab::Config => 4,
+            Tab::Settings => 5,
         })
         .style(Style::default().fg(Color::Green))
         .highlight_style(Style::default().fg(Color::Black).bg(Color::Green).add_modifier(Modifier::BOLD))
@@ -174,6 +256,7 @@ fn draw_main_content(f: &mut Frame, area: Rect, app: &App) {
         Tab::Resources => draw_resources(f, area, app),
         Tab::Network => draw_network(f, area, app),
         Tab::Logs => draw_logs(f, area, app),
+        Tab::Config => draw_config(f, area, app),
         Tab::Settings => draw_settings(f, area, app),
     }
 }
@@ -451,6 +534,25 @@ fn draw_logs(f: &mut Frame, area: Rect, _app: &App) {
     f.render_widget(logs, area);
 }
 
+fn draw_config(f: &mut Frame, area: Rect, app: &App) {
+    let config_content = match std::fs::read_to_string("/var/opt/lsiagent/lsiagent.cfg") {
+        Ok(content) => content,
+        Err(_) => "CONFIG FILE NOT FOUND OR ACCESS DENIED\n\nPATH: /var/opt/lsiagent/lsiagent.cfg\n\nThis file contains LSI Agent configuration settings.\nEnsure the daemon is properly installed and you have read permissions.\n\nYou can also check the example config file at: ./example/lsiagent.cfg".to_string(),
+    };
+
+    let config = Paragraph::new(config_content)
+        .style(Style::default().fg(Color::Green))
+        .wrap(Wrap { trim: true })
+        .scroll((app.config_scroll, 0))
+        .block(Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Green))
+            .title(" AGENT CONFIGURATION ")
+            .title_style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)));
+
+    f.render_widget(config, area);
+}
+
 fn draw_settings(f: &mut Frame, area: Rect, _app: &App) {
     let settings = Paragraph::new("SETTINGS WILL BE IMPLEMENTED HERE...\n\n- REFRESH RATE\n- ALERT THRESHOLDS\n- DAEMON CONFIGURATION\n- NETWORK ENDPOINTS")
         .style(Style::default().fg(Color::Green))
@@ -470,11 +572,16 @@ fn draw_status_bar(f: &mut Frame, area: Rect, app: &App) {
         "DIRECT"
     };
 
-    let status_text = format!(
-        " [F1-F5] NAV | [H/L/J/K] MOVE | [S] START | [X] STOP | [R] REFRESH | [Q] QUIT | MODE: {} | INTERVAL: {}ms ",
+    let base_status = format!(
+        " [F1-F6] NAV | [H/L/J/K] MOVE | [S] START | [X] STOP | [R] REFRESH | [Q] QUIT | MODE: {} | INTERVAL: {}ms ",
         management_type,
         app.refresh_rate.as_millis()
     );
+
+    let status_text = match app.current_tab {
+        Tab::Config => format!("{} | [↑/↓] SCROLL | [PgUp/PgDn] PAGE ", base_status),
+        _ => base_status,
+    };
 
     let status = Paragraph::new(status_text)
         .style(Style::default().fg(Color::Green).bg(Color::Black))

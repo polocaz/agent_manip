@@ -12,6 +12,7 @@ pub enum Tab {
     Resources,
     Network,
     Logs,
+    Config,
     Settings,
 }
 
@@ -21,7 +22,8 @@ impl Tab {
             Tab::Overview => Tab::Resources,
             Tab::Resources => Tab::Network,
             Tab::Network => Tab::Logs,
-            Tab::Logs => Tab::Settings,
+            Tab::Logs => Tab::Config,
+            Tab::Config => Tab::Settings,
             Tab::Settings => Tab::Overview,
         }
     }
@@ -32,7 +34,8 @@ impl Tab {
             Tab::Resources => Tab::Overview,
             Tab::Network => Tab::Resources,
             Tab::Logs => Tab::Network,
-            Tab::Settings => Tab::Logs,
+            Tab::Config => Tab::Logs,
+            Tab::Settings => Tab::Config,
         }
     }
 }
@@ -44,6 +47,7 @@ pub struct App {
     pub network_monitor: NetworkMonitor,
     pub last_update: Instant,
     pub refresh_rate: Duration,
+    pub config_scroll: u16, // Scroll position for config tab
 }
 
 impl App {
@@ -55,6 +59,7 @@ impl App {
             network_monitor: NetworkMonitor::new()?,
             last_update: Instant::now(),
             refresh_rate: Duration::from_millis(1000), // 1 second refresh
+            config_scroll: 0,
         })
     }
 
@@ -67,7 +72,8 @@ impl App {
             KeyCode::F(2) => self.current_tab = Tab::Resources,
             KeyCode::F(3) => self.current_tab = Tab::Network,
             KeyCode::F(4) => self.current_tab = Tab::Logs,
-            KeyCode::F(5) => self.current_tab = Tab::Settings,
+            KeyCode::F(5) => self.current_tab = Tab::Config,
+            KeyCode::F(6) => self.current_tab = Tab::Settings,
             // Vim-style navigation
             KeyCode::Char('h') => self.current_tab = self.current_tab.prev(), // left/previous tab
             KeyCode::Char('l') => self.current_tab = self.current_tab.next(), // right/next tab
@@ -86,6 +92,22 @@ impl App {
             KeyCode::Char('r') => {
                 // Manual refresh
                 self.last_update = Instant::now() - self.refresh_rate;
+            }
+            KeyCode::Up => {
+                if self.config_scroll > 0 {
+                    self.config_scroll = self.config_scroll.saturating_sub(1);
+                }
+            }
+            KeyCode::Down => {
+                self.config_scroll += 1; // Will be clamped in the UI
+            }
+            KeyCode::PageUp => {
+                if self.config_scroll > 0 {
+                    self.config_scroll = self.config_scroll.saturating_sub(10);
+                }
+            }
+            KeyCode::PageDown => {
+                self.config_scroll += 10; // Will be clamped in the UI
             }
             _ => {}
         }
