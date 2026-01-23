@@ -4,7 +4,7 @@ A terminal-based TUI application for monitoring and managing a Rust-based teleme
 
 ## Features
 
-- **Real-time Process Monitoring**: CPU, memory, disk I/O, and network usage tracking
+- **Real-time Process Monitoring**: CPU, memory, disk I/O, thread count, and file handles tracking
 - **Daemon Management**: Start, stop, and restart telemetry daemons
 - **Connection Monitoring**: WebSocket connection status and health metrics
 - **Network Traffic Analysis**: Data flow verification and traffic statistics
@@ -62,6 +62,7 @@ The application automatically detects and manages the Lakeside Software agent:
 - **Process Detection**: Automatically finds running processes by name:
   - Linux/macOS: `lsiagentd`
   - Windows: `LsiAgent.exe`
+- **Resource Monitoring**: Tracks CPU, memory, threads, and open file handles
 - **Cross-platform Paths**:
   - Linux: `/opt/lsiagent/bin/lsiagentd`
   - macOS: `/Library/Application Support/Lakeside Software/lsiagentd`

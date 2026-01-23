@@ -165,7 +165,7 @@ fn draw_resources(f: &mut Frame, area: Rect, app: &App) {
         .constraints([
             Constraint::Length(3), // CPU
             Constraint::Length(3), // Memory
-            Constraint::Length(3), // Threads
+            Constraint::Length(3), // Threads & File Handles
             Constraint::Min(1),    // Details
         ])
         .split(area);
@@ -191,19 +191,22 @@ fn draw_resources(f: &mut Frame, area: Rect, app: &App) {
 
     f.render_widget(memory, chunks[1]);
 
-    // Thread count
-    let thread_text = format!("Threads: {}", stats.thread_count);
-    let threads = Paragraph::new(thread_text)
-        .block(Block::default().borders(Borders::ALL).title("Threads"));
+    // Threads and File Handles
+    let threads_files_text = format!("Threads: {} | File Handles: {}",
+        stats.thread_count,
+        stats.open_files
+    );
+    let threads_files = Paragraph::new(threads_files_text)
+        .block(Block::default().borders(Borders::ALL).title("Threads & Files"));
 
-    f.render_widget(threads, chunks[2]);
+    f.render_widget(threads_files, chunks[2]);
 
     // Additional details
     let details_text = format!("Process: {}\nPID: {:?}\nUptime: {}s\nStart Time: {}",
         app.daemon_manager.get_process_name(),
         stats.pid,
         stats.uptime_seconds,
-        stats.start_time
+        format_timestamp(stats.start_time)
     );
     let details = Paragraph::new(details_text)
         .block(Block::default().borders(Borders::ALL).title("Process Details"));
@@ -299,6 +302,16 @@ fn format_memory(kb: u64) -> String {
         format!("{:.1} MB", kb as f64 / 1024.0)
     } else {
         format!("{:.1} GB", kb as f64 / (1024.0 * 1024.0))
+    }
+}
+
+fn format_timestamp(timestamp: u64) -> String {
+    use chrono::{Local, TimeZone};
+    
+    if let Some(datetime) = Local.timestamp_opt(timestamp as i64, 0).single() {
+        datetime.format("%Y-%m-%d %H:%M:%S").to_string()
+    } else {
+        format!("Invalid timestamp: {}", timestamp)
     }
 }
 

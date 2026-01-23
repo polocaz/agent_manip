@@ -36,6 +36,7 @@ pub struct ProcessStats {
     pub thread_count: usize,
     pub start_time: u64,
     pub uptime_seconds: u64,
+    pub open_files: usize, // Number of open file descriptors
 }
 
 impl Default for ProcessStats {
@@ -48,6 +49,7 @@ impl Default for ProcessStats {
             thread_count: 0,
             start_time: 0,
             uptime_seconds: 0,
+            open_files: 0,
         }
     }
 }
@@ -137,6 +139,7 @@ impl DaemonManager {
                             .unwrap_or_default()
                             .as_secs()
                             .saturating_sub(process.start_time()),
+                        open_files: get_open_file_count(pid),
                     };
                     DaemonState::Running
                 } else {
@@ -242,4 +245,29 @@ impl DaemonManager {
     pub fn is_using_systemctl(&self) -> bool {
         self.use_systemctl
     }
+}
+
+fn get_open_file_count(pid: u32) -> usize {
+    // Try to count open file descriptors
+    if cfg!(target_os = "linux") {
+        // On Linux, count files in /proc/[pid]/fd/
+        let fd_path = format!("/proc/{}/fd", pid);
+        if let Ok(entries) = std::fs::read_dir(&fd_path) {
+            return entries.count();
+        }
+    } else if cfg!(target_os = "macos") {
+        // On macOS, try using lsof command
+        if let Ok(output) = std::process::Command::new("lsof")
+            .args(["-p", &pid.to_string()])
+            .output()
+        {
+            if output.status.success() {
+                // Count lines (excluding header)
+                let output_str = String::from_utf8_lossy(&output.stdout);
+                return output_str.lines().count().saturating_sub(1);
+            }
+        }
+    }
+    // Fallback: return 0 if we can't determine
+    0
 }
