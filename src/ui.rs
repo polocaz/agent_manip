@@ -110,6 +110,20 @@ fn get_log_file_path(log_index: usize) -> PathBuf {
     }
 }
 
+/// Check which log files exist on the system
+pub fn get_available_log_files() -> Vec<usize> {
+    let mut available = Vec::new();
+    
+    for i in 0..10 {
+        let path = get_log_file_path(i);
+        if path.exists() {
+            available.push(i);
+        }
+    }
+    
+    available
+}
+
 pub async fn show_startup_animation(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> Result<()> {
     // Clear the screen first
     terminal.clear()?;
@@ -912,7 +926,48 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &mut App) {
         app.logs_scroll = max_scroll as u16;
     }
 
-    // Create title with current log file info
+    // Create log file tabs for available files
+    let available_logs = get_available_log_files();
+    let mut log_tabs = Vec::new();
+    
+    for &log_idx in &available_logs {
+        let tab_text = if log_idx == app.current_log_file {
+            format!("[{}*]", log_idx)
+        } else {
+            format!("[{}]", log_idx)
+        };
+        
+        let style = if log_idx == app.current_log_file {
+            Style::default().fg(Color::Black).bg(Color::Green)
+        } else {
+            Style::default().fg(Color::Green)
+        };
+        
+        log_tabs.push(Span::styled(tab_text, style));
+        log_tabs.push(Span::raw(" "));
+    }
+
+    // Split the area for log tabs and content
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // Log file tabs
+            Constraint::Min(1),    // Log content
+        ])
+        .split(area);
+
+    // Draw log file tabs
+    let tabs_line = Line::from(log_tabs);
+    let tabs_paragraph = Paragraph::new(vec![tabs_line])
+        .block(Block::default()
+            .borders(Borders::TOP)
+            .border_style(Style::default().fg(Color::Green))
+            .title(" AVAILABLE LOG FILES ")
+            .title_style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)));
+    
+    f.render_widget(tabs_paragraph, chunks[0]);
+
+    // Draw log content
     let title = format!(" LOG FILE {}: {} ", app.current_log_file, log_path.file_name().unwrap_or_default().to_string_lossy());
 
     let logs = Paragraph::new(log_content)
@@ -925,7 +980,7 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &mut App) {
             .title(title)
             .title_style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)));
 
-    f.render_widget(logs, area);
+    f.render_widget(logs, chunks[1]);
 }
 
 fn draw_config(f: &mut Frame, area: Rect, app: &mut App) {
@@ -967,14 +1022,14 @@ fn draw_status_bar(f: &mut Frame, area: Rect, app: &mut App) {
     };
 
     let base_status = format!(
-        " [F1-F6] NAV | [H/L/J/K] MOVE | [S] START | [X] STOP | [R] REFRESH | [Q] QUIT | MODE: {} | INTERVAL: {}ms ",
+        " [F1-F6] NAV | [H/L/J/K] MOVE | [S] START | [X] STOP | [R] REFRESH | [Q] QUIT | [MOUSE] CLICK TABS | MODE: {} | INTERVAL: {}ms ",
         management_type,
         app.refresh_rate.as_millis()
     );
 
     let status_text = match app.current_tab {
-        Tab::Config => format!("{} | [↑/↓] SCROLL | [PgUp/PgDn] PAGE ", base_status),
-        Tab::Logs => format!("{} | [↑/↓] SCROLL | [PgUp/PgDn] PAGE | [←/→] LOG FILE | [0-9] SELECT FILE ", base_status),
+        Tab::Config => format!("{} | [↑/↓] SCROLL | [PgUp/PgDn] PAGE | [MOUSE] WHEEL ", base_status),
+        Tab::Logs => format!("{} | [↑/↓] SCROLL | [PgUp/PgDn] PAGE | [MOUSE] WHEEL+TABS | [←/→] LOG FILE | [0-9] SELECT FILE ", base_status),
         _ => base_status,
     };
 

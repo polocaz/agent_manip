@@ -5,6 +5,7 @@ use anyhow::Result;
 use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    event::{EnableMouseCapture, DisableMouseCapture},
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
 use libc;
@@ -25,7 +26,7 @@ async fn main() -> Result<()> {
     // Setup terminal
     enable_raw_mode()?;
     let mut stdout = stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
@@ -47,7 +48,7 @@ async fn main() -> Result<()> {
 
     // Restore terminal
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
     terminal.show_cursor()?;
 
     if let Err(err) = res {
@@ -62,17 +63,31 @@ async fn run_app(
     mut app: App,
 ) -> io::Result<()> {
     let mut last_tick = Instant::now();
-    let tick_rate = Duration::from_millis(100);
+    let tick_rate = Duration::from_millis(100); // Keep original tick rate for data updates
+    let mut last_draw = Instant::now();
+    let draw_rate = Duration::from_millis(16); // 60 FPS drawing
 
     loop {
-        terminal.draw(|f| ui::draw(f, &mut app))?;
+        // Draw at 60 FPS for smooth UI
+        if last_draw.elapsed() >= draw_rate {
+            terminal.draw(|f| ui::draw(f, &mut app))?;
+            last_draw = Instant::now();
+        }
 
-        if crossterm::event::poll(tick_rate)? {
-            if let crossterm::event::Event::Key(key) = crossterm::event::read()? {
-                app.on_key(key);
+        // Poll for events with very short timeout for responsive input
+        if crossterm::event::poll(Duration::from_millis(1))? {
+            match crossterm::event::read()? {
+                crossterm::event::Event::Key(key) => {
+                    app.on_key(key);
+                }
+                crossterm::event::Event::Mouse(mouse) => {
+                    app.on_mouse(mouse);
+                }
+                _ => {}
             }
         }
 
+        // Handle data updates at original rate
         if last_tick.elapsed() >= tick_rate {
             app.on_tick().await;
             last_tick = Instant::now();
@@ -81,5 +96,8 @@ async fn run_app(
         if app.should_quit {
             return Ok(());
         }
+
+        // Small sleep to prevent 100% CPU usage
+        tokio::time::sleep(Duration::from_millis(1)).await;
     }
 }

@@ -204,6 +204,77 @@ impl App {
         }
     }
 
+    pub fn on_mouse(&mut self, mouse: crossterm::event::MouseEvent) {
+        match mouse.kind {
+            crossterm::event::MouseEventKind::ScrollUp => {
+                match self.current_tab {
+                    Tab::Config => {
+                        if self.config_scroll > 0 {
+                            self.config_scroll = self.config_scroll.saturating_sub(3); // Scroll 3 lines at a time
+                        }
+                    }
+                    Tab::Logs => {
+                        if self.logs_scroll > 0 {
+                            self.logs_scroll = self.logs_scroll.saturating_sub(3); // Scroll 3 lines at a time
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            crossterm::event::MouseEventKind::ScrollDown => {
+                match self.current_tab {
+                    Tab::Config => {
+                        self.config_scroll += 3; // Scroll 3 lines at a time, will be clamped in UI
+                    }
+                    Tab::Logs => {
+                        self.logs_scroll += 3; // Scroll 3 lines at a time, will be clamped in UI
+                    }
+                    _ => {}
+                }
+            }
+            crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
+                // Handle main tab clicks - tabs are typically at y=5-6, x varies by tab
+                // Each tab is roughly equal width
+                if mouse.row >= 5 && mouse.row <= 6 { // Main tab area
+                    let tab_width = 80 / 6; // Approximate width per tab (80 chars / 6 tabs)
+                    let clicked_tab = (mouse.column as usize) / tab_width;
+                    
+                    match clicked_tab {
+                        0 => self.current_tab = Tab::Overview,
+                        1 => self.current_tab = Tab::Resources,
+                        2 => self.current_tab = Tab::Network,
+                        3 => self.current_tab = Tab::Logs,
+                        4 => self.current_tab = Tab::Config,
+                        5 => self.current_tab = Tab::Settings,
+                        _ => {}
+                    }
+                }
+                
+                // Handle log file tab clicks on Logs tab
+                if self.current_tab == Tab::Logs && mouse.row >= 7 && mouse.row <= 7 { // Log tabs area
+                    // Check which log file tab was clicked
+                    // Each tab is roughly "[X]" (3 chars) + space (1 char) = 4 chars wide
+                    let tab_width = 4;
+                    let clicked_tab = (mouse.column as usize) / tab_width;
+                    
+                    // Get available log files and find which one was clicked
+                    use crate::ui::get_available_log_files;
+                    let available_logs = get_available_log_files();
+                    
+                    if clicked_tab < available_logs.len() {
+                        let selected_log = available_logs[clicked_tab];
+                        if selected_log != self.current_log_file {
+                            self.current_log_file = selected_log;
+                            self.logs_scroll = 0; // Reset scroll when switching files
+                            self.last_log_content_len = 0; // Reset content tracking for new file
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
     pub async fn on_tick(&mut self) {
         if self.last_update.elapsed() >= self.refresh_rate {
             self.daemon_manager.update_status().await;
