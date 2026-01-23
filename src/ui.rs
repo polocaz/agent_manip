@@ -253,7 +253,7 @@ fn draw_settings(f: &mut Frame, area: Rect, _app: &App) {
 
 fn draw_status_bar(f: &mut Frame, area: Rect, app: &App) {
     let status_text = format!(
-        " [F1] Overview [F2] Resources [F3] Network [F4] Logs [F5] Settings | [S] Start [X] Stop [R] Refresh [Q] Quit | Refresh: {}ms ",
+        " [F1-F5] Tabs [h/l/j/k] Navigate | [S] Start [X] Stop [R] Refresh [Q] Quit | Refresh: {}ms ",
         app.refresh_rate.as_millis()
     );
 

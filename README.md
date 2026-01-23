@@ -40,12 +40,19 @@ The compiled binary will be available in `target/release/telemetry-daemon-manage
 
 ### Keyboard Shortcuts
 
-- `F1-F5`: Switch between tabs (Overview, Resources, Network, Logs, Settings)
-- `Tab`: Cycle through tabs
-- `S`: Start daemon
-- `X`: Stop daemon
-- `R`: Manual refresh
-- `Q` or `Esc`: Quit application
+- **Tab Navigation**:
+  - `F1-F5`: Switch between tabs (Overview, Resources, Network, Logs, Settings)
+  - `Tab`: Cycle forward through tabs
+  - `Shift+Tab`: Cycle backward through tabs
+  - **Vim-style**: `h` (previous tab), `l` (next tab), `j` (next tab), `k` (previous tab)
+
+- **Daemon Control**:
+  - `S`: Start daemon
+  - `X`: Stop daemon
+  - `R`: Manual refresh
+
+- **Application**:
+  - `Q` or `Esc`: Quit application
 
 ## Architecture
 

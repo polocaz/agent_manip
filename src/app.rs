@@ -68,6 +68,11 @@ impl App {
             KeyCode::F(3) => self.current_tab = Tab::Network,
             KeyCode::F(4) => self.current_tab = Tab::Logs,
             KeyCode::F(5) => self.current_tab = Tab::Settings,
+            // Vim-style navigation
+            KeyCode::Char('h') => self.current_tab = self.current_tab.prev(), // left/previous tab
+            KeyCode::Char('l') => self.current_tab = self.current_tab.next(), // right/next tab
+            KeyCode::Char('j') => self.current_tab = self.current_tab.next(), // down/next tab
+            KeyCode::Char('k') => self.current_tab = self.current_tab.prev(), // up/previous tab
             KeyCode::Char('s') => {
                 if let Err(e) = self.daemon_manager.start_daemon() {
                     eprintln!("Failed to start daemon: {}", e);
