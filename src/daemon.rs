@@ -56,10 +56,12 @@ pub struct DaemonManager {
     system: Arc<Mutex<System>>,
     daemon_name: String,
     daemon_path: String,
+    service_name: String,
     current_pid: Option<u32>,
     state: DaemonState,
     process_stats: ProcessStats,
     last_start_attempt: std::time::Instant,
+    use_systemctl: bool,
 }
 
 impl DaemonManager {
@@ -67,14 +69,36 @@ impl DaemonManager {
         let mut system = System::new_all();
         system.refresh_all();
 
+        // Check if systemctl is available (Linux with systemd)
+        let use_systemctl = cfg!(target_os = "linux") && 
+            Command::new("systemctl")
+                .arg("--version")
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false);
+
+        // Determine daemon name and path based on platform
+        let (daemon_name, daemon_path) = if cfg!(target_os = "windows") {
+            ("LsiAgent.exe".to_string(), "C:\\Program Files\\Lakeside Software\\LsiAgent.exe".to_string())
+        } else if cfg!(target_os = "macos") {
+            ("lsiagentd".to_string(), "/Library/Application Support/Lakeside Software/lsiagentd".to_string())
+        } else {
+            // Linux and other Unix-like systems
+            ("lsiagentd".to_string(), "/opt/lsiagent/bin/lsiagentd".to_string())
+        };
+
         Ok(Self {
             system: Arc::new(Mutex::new(system)),
-            daemon_name: "telemetry-daemon".to_string(), // TODO: Make configurable
-            daemon_path: "./telemetry-daemon".to_string(), // TODO: Make configurable
+            daemon_name,
+            daemon_path,
+            service_name: "lsiagent".to_string(), // systemctl service name
             current_pid: None,
             state: DaemonState::Unknown,
             process_stats: ProcessStats::default(),
             last_start_attempt: std::time::Instant::now(),
+            use_systemctl,
         })
     }
 
@@ -85,7 +109,13 @@ impl DaemonManager {
         // Try to find the daemon process
         self.current_pid = None;
         for (pid, process) in system.processes() {
-            if process.name().contains(&self.daemon_name) {
+            let process_name = process.name().to_lowercase();
+            let daemon_name_lower = self.daemon_name.to_lowercase();
+            
+            // Check for exact match or common variations
+            if process_name == daemon_name_lower ||
+               process_name.contains(&daemon_name_lower.trim_end_matches(".exe")) ||
+               process_name.contains("lsiagent") {
                 self.current_pid = Some(pid.as_u32());
                 break;
             }
@@ -125,29 +155,76 @@ impl DaemonManager {
         self.state = DaemonState::Starting;
         self.last_start_attempt = std::time::Instant::now();
 
-        // Start the daemon process
-        let child = Command::new(&self.daemon_path)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .map_err(|e| anyhow!("Failed to start daemon process: {}", e))?;
+        if self.use_systemctl {
+            // Use systemctl to start the service
+            let output = Command::new("systemctl")
+                .args(["start", &self.service_name])
+                .output()
+                .map_err(|e| anyhow!("Failed to run systemctl start: {}", e))?;
 
-        self.current_pid = Some(child.id());
+            if !output.status.success() {
+                self.state = DaemonState::Stopped;
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(anyhow!("systemctl start failed: {}", stderr));
+            }
+        } else {
+            // Fallback to direct process start
+            let child = Command::new(&self.daemon_path)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .map_err(|e| anyhow!("Failed to start daemon process: {}", e))?;
+
+            self.current_pid = Some(child.id());
+        }
+
         Ok(())
     }
 
     pub fn stop_daemon(&mut self) -> Result<()> {
-        let pid = self.current_pid.ok_or_else(|| anyhow!("No daemon process running"))?;
-
         self.state = DaemonState::Stopping;
 
-        // Send SIGTERM first
-        unsafe {
-            libc::kill(pid as i32, libc::SIGTERM);
+        if self.use_systemctl {
+            // Use systemctl to stop the service
+            let output = Command::new("systemctl")
+                .args(["stop", &self.service_name])
+                .output()
+                .map_err(|e| anyhow!("Failed to run systemctl stop: {}", e))?;
+
+            if !output.status.success() {
+                self.state = DaemonState::Running; // Revert state if stop failed
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(anyhow!("systemctl stop failed: {}", stderr));
+            }
+        } else {
+            // Fallback to direct process termination
+            let pid = self.current_pid.ok_or_else(|| anyhow!("No daemon process running"))?;
+
+            // Send SIGTERM first
+            unsafe {
+                libc::kill(pid as i32, libc::SIGTERM);
+            }
         }
 
-        // TODO: Implement graceful shutdown timeout and SIGKILL fallback
         Ok(())
+    }
+
+    pub fn get_service_status(&self) -> Result<String> {
+        if !self.use_systemctl {
+            return Ok("systemctl not available".to_string());
+        }
+
+        let output = Command::new("systemctl")
+            .args(["status", &self.service_name, "--no-pager", "-l"])
+            .output()
+            .map_err(|e| anyhow!("Failed to run systemctl status: {}", e))?;
+
+        if output.status.success() {
+            Ok(String::from_utf8_lossy(&output.stdout).to_string())
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            Ok(format!("Failed to get status: {}", stderr))
+        }
     }
 
     pub fn get_state(&self) -> DaemonState {
@@ -156,5 +233,13 @@ impl DaemonManager {
 
     pub fn get_process_stats(&self) -> &ProcessStats {
         &self.process_stats
+    }
+
+    pub fn get_process_name(&self) -> &str {
+        &self.daemon_name
+    }
+
+    pub fn is_using_systemctl(&self) -> bool {
+        self.use_systemctl
     }
 }

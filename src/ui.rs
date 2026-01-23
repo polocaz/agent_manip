@@ -90,7 +90,12 @@ fn draw_overview(f: &mut Frame, area: Rect, app: &App) {
         _ => Color::Yellow,
     };
 
-    let status_text = format!("Daemon Status: {}", daemon_state);
+    let stats = app.daemon_manager.get_process_stats();
+    let status_text = if let Some(pid) = stats.pid {
+        format!("Daemon Status: {} (PID: {}, Process: {})", daemon_state, pid, app.daemon_manager.get_process_name())
+    } else {
+        format!("Daemon Status: {} (Looking for: {})", daemon_state, app.daemon_manager.get_process_name())
+    };
     let status = Paragraph::new(status_text)
         .style(Style::default().fg(state_color).add_modifier(Modifier::BOLD))
         .block(Block::default().borders(Borders::ALL).title("Status"));
@@ -132,9 +137,24 @@ fn draw_overview(f: &mut Frame, area: Rect, app: &App) {
 
     f.render_widget(metrics, chunks[1]);
 
-    // Recent events placeholder
-    let events = Paragraph::new("Recent events will be displayed here...")
-        .block(Block::default().borders(Borders::ALL).title("Recent Events"));
+    // Recent events - show systemctl status if available
+    let events_text = if app.daemon_manager.is_using_systemctl() {
+        match app.daemon_manager.get_service_status() {
+            Ok(status) => {
+                // Show the last few lines of systemctl status
+                let lines: Vec<&str> = status.lines().collect();
+                let recent_lines: Vec<String> = lines.iter().rev().take(5).rev().map(|s| s.to_string()).collect();
+                recent_lines.join("\n")
+            }
+            Err(e) => format!("Failed to get systemctl status: {}", e),
+        }
+    } else {
+        "systemctl not available - using direct process management".to_string()
+    };
+
+    let events = Paragraph::new(events_text)
+        .wrap(Wrap { trim: true })
+        .block(Block::default().borders(Borders::ALL).title("Service Status"));
 
     f.render_widget(events, chunks[2]);
 }
@@ -179,7 +199,8 @@ fn draw_resources(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(threads, chunks[2]);
 
     // Additional details
-    let details_text = format!("PID: {:?}\nUptime: {}s\nStart Time: {}",
+    let details_text = format!("Process: {}\nPID: {:?}\nUptime: {}s\nStart Time: {}",
+        app.daemon_manager.get_process_name(),
         stats.pid,
         stats.uptime_seconds,
         stats.start_time
@@ -252,8 +273,15 @@ fn draw_settings(f: &mut Frame, area: Rect, _app: &App) {
 }
 
 fn draw_status_bar(f: &mut Frame, area: Rect, app: &App) {
+    let management_type = if app.daemon_manager.is_using_systemctl() {
+        "systemctl"
+    } else {
+        "direct"
+    };
+
     let status_text = format!(
-        " [F1-F5] Tabs [h/l/j/k] Navigate | [S] Start [X] Stop [R] Refresh [Q] Quit | Refresh: {}ms ",
+        " [F1-F5] Tabs [h/l/j/k] Navigate | [S] Start [X] Stop [R] Refresh [Q] Quit | Mode: {} | Refresh: {}ms ",
+        management_type,
         app.refresh_rate.as_millis()
     );
 

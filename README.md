@@ -10,6 +10,7 @@ A terminal-based TUI application for monitoring and managing a Rust-based teleme
 - **Network Traffic Analysis**: Data flow verification and traffic statistics
 - **Tabbed Interface**: Overview, Resources, Network, Logs, and Settings views
 - **Keyboard Navigation**: Intuitive shortcuts for all operations
+- **Systemd Integration**: Automatic systemctl usage on Linux systems for proper service management
 
 ## Prerequisites
 
@@ -53,6 +54,22 @@ The compiled binary will be available in `target/release/telemetry-daemon-manage
 
 - **Application**:
   - `Q` or `Esc`: Quit application
+
+## Daemon Management
+
+The application automatically detects and manages the Lakeside Software agent:
+
+- **Process Detection**: Automatically finds running processes by name:
+  - Linux/macOS: `lsiagentd`
+  - Windows: `LsiAgent.exe`
+- **Cross-platform Paths**:
+  - Linux: `/opt/lsiagent/bin/lsiagentd`
+  - macOS: `/Library/Application Support/Lakeside Software/lsiagentd`
+  - Windows: `C:\Program Files\Lakeside Software\LsiAgent.exe`
+- **Systemd Integration**: Uses `systemctl start/stop/status lsiagent` on Linux systems
+- **Fallback**: Direct process management on non-systemd systems
+
+The service status is displayed in the Overview tab, showing real-time systemctl status information when available.
 
 ## Architecture
 
