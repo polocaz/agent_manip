@@ -89,11 +89,39 @@ impl App {
             KeyCode::F(4) => self.current_tab = Tab::Logs,
             KeyCode::F(5) => self.current_tab = Tab::Config,
             KeyCode::F(6) => self.current_tab = Tab::Settings,
-            // Vim-style navigation
+            // Vim-style navigation: h/l move tabs, j/k scroll half-page in scrollable views
             KeyCode::Char('h') => self.current_tab = self.current_tab.prev(), // left/previous tab
             KeyCode::Char('l') => self.current_tab = self.current_tab.next(), // right/next tab
-            KeyCode::Char('j') => self.current_tab = self.current_tab.next(), // down/next tab
-            KeyCode::Char('k') => self.current_tab = self.current_tab.prev(), // up/previous tab
+            KeyCode::Char('j') => {
+                // Scroll half a page down for scrollable tabs (Config, Logs)
+                if let Ok((_, rows)) = crossterm::terminal::size() {
+                    let half = (rows / 2).max(1) as u16;
+                    match self.current_tab {
+                        Tab::Config => {
+                            self.config_scroll = self.config_scroll.saturating_add(half);
+                        }
+                        Tab::Logs => {
+                            self.logs_scroll = self.logs_scroll.saturating_add(half);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            KeyCode::Char('k') => {
+                // Scroll half a page up for scrollable tabs (Config, Logs)
+                if let Ok((_, rows)) = crossterm::terminal::size() {
+                    let half = (rows / 2).max(1) as u16;
+                    match self.current_tab {
+                        Tab::Config => {
+                            self.config_scroll = self.config_scroll.saturating_sub(half);
+                        }
+                        Tab::Logs => {
+                            self.logs_scroll = self.logs_scroll.saturating_sub(half);
+                        }
+                        _ => {}
+                    }
+                }
+            }
             KeyCode::Char('s') => {
                 if let Err(e) = self.daemon_manager.start_daemon() {
                     eprintln!("Failed to start daemon: {}", e);

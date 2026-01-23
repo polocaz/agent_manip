@@ -990,7 +990,21 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &mut App) {
     // Draw log content
     let title = format!(" LOG FILE {}: {} ", app.current_log_file, log_path.file_name().unwrap_or_default().to_string_lossy());
 
-    let logs = Paragraph::new(log_content)
+    // Add line numbers to the log content for clarity
+    let content_line_count = if let Some(cached) = app.log_cache.get(&app.current_log_file) {
+        cached.line_count
+    } else {
+        log_content.lines().count()
+    };
+
+    let digits = std::cmp::max(1, content_line_count).to_string().len();
+    let mut numbered = String::with_capacity(log_content.len() + content_line_count * (digits + 3));
+    for (i, line) in log_content.lines().enumerate() {
+        let idx = i + 1;
+        numbered.push_str(&format!("{:>width$} │ {}\n", idx, line, width = digits));
+    }
+
+    let logs = Paragraph::new(numbered)
         .style(Style::default().fg(Color::Green))
         .wrap(Wrap { trim: true })
         .scroll((app.logs_scroll, 0))
@@ -1008,8 +1022,16 @@ fn draw_config(f: &mut Frame, area: Rect, app: &mut App) {
         Ok(content) => content,
         Err(_) => "CONFIG FILE NOT FOUND OR ACCESS DENIED\n\nPATH: /var/opt/lsiagent/lsiagent.cfg\n\nThis file contains LSI Agent configuration settings.\nEnsure the daemon is properly installed and you have read permissions.\n\nYou can also check the example config file at: ./example/lsiagent.cfg".to_string(),
     };
+    // Add line numbers to the configuration view
+    let config_line_count = config_content.lines().count();
+    let digits = std::cmp::max(1, config_line_count).to_string().len();
+    let mut numbered = String::with_capacity(config_content.len() + config_line_count * (digits + 3));
+    for (i, line) in config_content.lines().enumerate() {
+        let idx = i + 1;
+        numbered.push_str(&format!("{:>width$} │ {}\n", idx, line, width = digits));
+    }
 
-    let config = Paragraph::new(config_content)
+    let config = Paragraph::new(numbered)
         .style(Style::default().fg(Color::Green))
         .wrap(Wrap { trim: true })
         .scroll((app.config_scroll, 0))

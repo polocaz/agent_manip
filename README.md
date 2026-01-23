@@ -1,6 +1,6 @@
-# Telemetry Daemon Manager
+# agent_manip — LSI Agent Manager (lsman)
 
-A terminal-based TUI application for monitoring and managing a Rust-based telemetry daemon. Built using the ratatui library, this tool provides real-time insights into the daemon's resource usage, connection status, and operational state, while offering management capabilities to start, stop, and troubleshoot the telemetry agent.
+`agent_manip` (binary: `lsman`) is a terminal-based TUI for monitoring and managing the Lakeside Software telemetry agent. It provides a compact, retro-style Pip-Boy inspired interface for real-time system metrics, network/connection status, and log inspection, plus basic daemon control (start/stop/restart).
 
 ## Features
 
@@ -14,120 +14,70 @@ A terminal-based TUI application for monitoring and managing a Rust-based teleme
 
 ## Prerequisites
 
-- Rust 1.85.0 or higher
-- Cargo package manager
+- Rust (stable) and Cargo
 
 ## Installation
 
-1. Clone the repository:
+Clone and build:
 ```bash
 git clone <repository-url>
-cd telemetry-daemon-manager
-```
-
-2. Build the application:
-```bash
+cd agent_manip
 cargo build --release
 ```
 
-The compiled binary will be available in `target/release/telemetry-daemon-manager`
+The release binary will be at `target/release/lsman`.
 
 ## Usage
 
-1. Run the application:
+Run the UI (use `sudo` if you need access to system log files):
+
 ```bash
-./target/release/telemetry-daemon-manager
+./target/release/lsman
 ```
 
-### Keyboard Shortcuts
+Keyboard shortcuts
 
-- **Tab Navigation**:
-  - `F1-F5`: Switch between tabs (Overview, Resources, Network, Logs, Settings)
-  - `Tab`: Cycle forward through tabs
-  - `Shift+Tab`: Cycle backward through tabs
-  - **Vim-style**: `h` (previous tab), `l` (next tab), `j` (next tab), `k` (previous tab)
+- Tab navigation:
+  - `F1`..`F6`: Jump to specific tabs
+  - `Tab` / `Shift+Tab`: Cycle tabs
+  - `h` / `l`: Move one tab left/right
+- Scrolling:
+  - `Up` / `Down`: Line-by-line scroll
+  - `PageUp` / `PageDown`: Page scroll
+  - `j` / `k`: Half-page down/up (in scrollable views)
+- Daemon control:
+  - `s`: Start daemon
+  - `x`: Stop daemon
+  - `r`: Manual refresh
+- Misc:
+  - `q` / `Esc`: Quit
 
-- **Daemon Control**:
-  - `S`: Start daemon
-  - `X`: Stop daemon
-  - `R`: Manual refresh
+## Daemon detection & management
 
-- **Application**:
-  - `Q` or `Esc`: Quit application
-
-## Daemon Management
-
-The application automatically detects and manages the Lakeside Software agent:
-
-- **Process Detection**: Automatically finds running processes by name:
-  - Linux/macOS: `lsiagentd`
-  - Windows: `LsiAgent.exe`
-- **Resource Monitoring**: Tracks CPU, memory, threads, and open file handles
-- **Cross-platform Paths**:
-  - Linux: `/opt/lsiagent/bin/lsiagentd`
-  - macOS: `/Library/Application Support/Lakeside Software/lsiagentd`
-  - Windows: `C:\Program Files\Lakeside Software\LsiAgent.exe`
-- **Systemd Integration**: Uses `systemctl start/stop/status lsiagent` on Linux systems
-- **Fallback**: Direct process management on non-systemd systems
-
-The service status is displayed in the Overview tab, showing real-time systemctl status information when available.
+`lsman` looks for common LSI agent process names and paths on each platform and surfaces service status in the Overview tab. On Linux with systemd, it will use `systemctl` when available; otherwise it falls back to direct process inspection.
 
 ## Architecture
 
-The application consists of several key modules:
+High-level modules:
 
-- **Main**: Terminal setup and event loop
-- **App**: Application state and event handling
-- **Daemon**: Process monitoring and daemon management
-- **Network**: WebSocket connection and traffic monitoring
-- **UI**: Terminal user interface rendering
-- **Error**: Custom error types and handling
-  - Errors in past x time
-  - iops 
-- Configuration monitoring and overriding
-
-## Prerequisites
-
-- Rust 1.81.0 or higher
-- Cargo package manager
-
-## Installation
-
-1. Clone the repository:
-```bash
-git clone <repository-url>
-cd telemetry-daemon-manager
-```
-
-2. Build the application:
-```bash
-cargo build --release
-```
-
-The compiled binary will be available in `target/release/agent_manip`
-
-## Usage
-
-1. Run the application:
-```bash
-./target/release/agent_manip
-```
-2. The application will point to the default locations of agent files, but they can be chosen via file picker
-  a. TODO: Load file paths from 
+- `main.rs` — terminal setup and event loop
+- `app.rs` — application state, input handling, and high-level behavior
+- `daemon.rs` — process discovery and control
+- `network.rs` — connection monitoring
+- `ui.rs` — rendering with `ratatui`
+- `log_reader` / cache — efficient log tailing and parsing
 
 ## Development
 
-- The application is structured into four main modules:
-  - `agent_monitor` : Agent service interaction
-  - `db`: Database interaction layer
-  - `log_reader`: Log file parsing and monitoring
-  - `ui`: User interface components
+Contributions welcome. Run tests and linters with:
 
-- To run tests:
 ```bash
 cargo test
+cargo clippy -- -D warnings
 ```
+
+If you plan to change UI layout, see `src/ui.rs` for rendering helpers and `src/app.rs` for input handling.
 
 ## License
 
-MIT License 
+MIT
