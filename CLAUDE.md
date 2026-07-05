@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-`agent_manip` builds a binary named **`lsman`** — a debugging tool for the Lakeside Software (SysTrack) telemetry agent (`lsiagentd`). Two modes: script-friendly CLI subcommands (`lsman status|logs|errors|trace|config|db|crashes|net|start|stop|restart`), and a Pip-Boy-styled ratatui TUI when run with no arguments.
+`agent_manip` builds a binary named **`lsman`** — a debugging tool for the Lakeside Software (SysTrack) telemetry agent (`lsiagentd`). Three modes: script-friendly CLI subcommands (`lsman status|logs|errors|trace|config|db|crashes|net|start|stop|restart|report|collect|where`), a read-only web dashboard (`lsman serve`), and a Pip-Boy-styled ratatui TUI when run with no arguments.
 
 The agent being debugged lives in `~/src/systrack-col1710/Agent/` (see its CLAUDE.md and the repo's `agent-bug-investigation` skill). Facts about the agent install (paths, launchd label, log names, config format) were verified against that source tree — **`src/paths.rs` is the single source of truth for them here**; never hardcode agent paths elsewhere.
 
@@ -25,7 +25,11 @@ CI (`.github/workflows/rust.yml`) runs build, test, and `clippy -- -D warnings` 
 ## Architecture
 
 - `main.rs` — clap `Cli` parsing; a subcommand dispatches to `cli::run`, no subcommand enters the TUI event loop (60 FPS draw / 1ms input poll / 100ms tick, gated to 1s refresh in `App::on_tick`).
-- `cli.rs` — all subcommand implementations, plus the `lsiagent.cfg` trace-level parsing/editing (`read_log_level`/`set_log_level`, unit-tested). Log reading is **streamed/bounded** — the main agent log can be hundreds of MB; never `read_to_string` an agent log.
+- `cli.rs` — subcommand implementations, plus the `lsiagent.cfg` trace-level parsing/editing (`read_log_level`/`set_log_level`, unit-tested) and `where` (log site → agent source checkout: `$LSMAN_AGENT_SRC`, `~/src/systrack/Agent`, `~/src/systrack-col1710/Agent`). Log reading is **streamed/bounded** — the main agent log can be hundreds of MB; never `read_to_string` an agent log.
+- `triage.rs` — agent log-line parsing (timestamp/site/level) and error grouping by source site (unit-tested). This is where log-format knowledge lives.
+- `report.rs` — `DiagSnapshot`: one gather pass serialized as markdown (`lsman report`), JSON (`serve`), or into the `collect` bundle. `scan_errors*` streams whole logs — never call it per poll/tick.
+- `collect.rs` — support-case `.tar.gz` bundle (report + config + tail-capped log copies + crash reports + lsof/service state); shells out to `tar`.
+- `serve.rs` + `assets/dashboard.html` (embedded via `include_str!`) — `tiny_http` on 4 threads, read-only JSON endpoints (`/api/snapshot`, `/api/errors`, `/api/log`). Log tails read at most the last 1 MB per request. Deliberately no daemon control or config writes over HTTP.
 - `paths.rs` — agent install facts: base dir, `known_logs()` (short name → path map, incl. dynamic per-user logs on macOS), config/db/binary paths, launchd label, crash-report dirs.
 - `daemon.rs` — `DaemonManager`: finds the process via sysinfo name match, controls it through `ServiceManager` (launchctl on macOS / systemctl on Linux / direct fallback). The macOS daemon is a **KeepAlive LaunchDaemon** — stop must go through `launchctl bootout`; a plain kill gets respawned. `update_status()` also caches the service-manager status text so the render loop never shells out.
 - `network.rs` — real socket state via `lsof -nP -a -i -p <pid>` (parser unit-tested). An ESTABLISHED TCP connection is the practical "uplink to master is up" signal.
@@ -37,6 +41,7 @@ CI (`.github/workflows/rust.yml`) runs build, test, and `clippy -- -D warnings` 
 - Config `<base>/lsiagent.cfg`; trace level = `LogLevel2` in `[Debug]` (0=none, 1=err, 2=warn, 3=info default, 4-8=trace1..5); non-zero local value overrides master config.
 - DB `<base>/database/collect.sqlite3` — always open read-only (`sqlite3 -readonly`) against a live agent.
 - Log timestamps are UTC; each line embeds `<file>(<line>)` pointing into the agent source; error lines carry ` -E `.
+- Verified against a live agent: the site is logged **without the file extension** (`dbConnNix(1119)`, not `dbConnNix.cpp(1119)`), padded into a fixed-width column that **truncates long names** (`threadStatusBarBridge(75` — no closing paren, line digits cut). `triage.rs` handles both; `where` matches stems against `.cpp/.c/.cc/.h/.hpp/.m/.mm`.
 - macOS crash reports land in `/Library/Logs/DiagnosticReports` (daemon) and `~/Library/Logs/DiagnosticReports` (LsiStatusBar / SysTrackManagementUser) — the agent installs no crash handler.
 
 ### Gotchas
