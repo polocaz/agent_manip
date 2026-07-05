@@ -2,51 +2,61 @@ use std::io::{self, stdout};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
+use clap::Parser;
 use crossterm::{
+    event::{DisableMouseCapture, EnableMouseCapture},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
-    event::{EnableMouseCapture, DisableMouseCapture},
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
-use libc;
 
 mod app;
+mod cli;
 mod daemon;
-mod error;
 mod network;
+mod paths;
 mod ui;
 
 use app::App;
 
+#[derive(Parser)]
+#[command(
+    name = "lsman",
+    version,
+    about = "Debug and manage the LSI (SysTrack) agent",
+    long_about = "Debug and manage the LSI (SysTrack) agent.\n\n\
+                  Run without a subcommand for the interactive TUI. Subcommands give\n\
+                  script-friendly access to daemon status, logs, trace levels, the\n\
+                  agent database, and crash reports."
+)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<cli::CliCommand>,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize logging
     env_logger::init();
 
-    // Setup terminal
+    let args = Cli::parse();
+    match args.command {
+        Some(command) => cli::run(command).await,
+        None => run_tui().await,
+    }
+}
+
+async fn run_tui() -> Result<()> {
     enable_raw_mode()?;
     let mut stdout = stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    // Show startup animation
     ui::show_startup_animation(&mut terminal).await?;
 
-    // Check if running as root after animation
-    let is_root = unsafe { libc::geteuid() == 0 };
-    if !is_root {
-        disable_raw_mode()?;
-        execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-        terminal.show_cursor()?;
-        std::process::exit(1);
-    }
-
-    // Create app and run it
     let app = App::new()?;
     let res = run_app(&mut terminal, app).await;
 
-    // Restore terminal
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
     terminal.show_cursor()?;

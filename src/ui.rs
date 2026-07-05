@@ -41,14 +41,16 @@ fn get_cached_log_content(log_path: &std::path::Path, log_index: usize, cache: &
         }
     }
     
-    // File doesn't exist in cache or has been modified, read it
-    let full_content = match std::fs::read_to_string(log_path) {
+    // File doesn't exist in cache or has been modified, read it.
+    // Agent logs can be hundreds of MB, so only read the tail of the file.
+    const MAX_READ_BYTES: u64 = 1024 * 1024;
+    let full_content = match read_file_tail(log_path, MAX_READ_BYTES) {
         Ok(content) => content,
         Err(e) => {
-            return (format!("UNABLE TO READ LOG FILE\n\nPATH: {}\n\nERROR: {}\n\nPossible causes:\n• File does not exist\n• Insufficient permissions\n• Daemon not installed\n\nTry running with elevated privileges or check installation.", log_path.display(), e), true);
+            return (format!("UNABLE TO READ LOG FILE\n\nPATH: {}\n\nERROR: {}\n\nPossible causes:\n• File does not exist\n• Insufficient permissions\n• Daemon not installed\n\nTry running with elevated privileges (sudo) or check installation.", log_path.display(), e), true);
         }
     };
-    
+
     // Process content: limit to last MAX_LOG_LINES and handle empty files
     let content = if full_content.is_empty() {
         format!("LOG FILE IS EMPTY\n\nPATH: {}\n\nThe log file exists but contains no content.", log_path.display())
@@ -60,13 +62,13 @@ fn get_cached_log_content(log_path: &std::path::Path, log_index: usize, cache: &
         } else {
             0
         };
-        
+
         let limited_lines = &lines[start_idx..];
         let limited_content = limited_lines.join("\n");
-        
+
         // Add a note if content was truncated
         if lines.len() > MAX_LOG_LINES {
-            format!("... (showing last {} of {} lines)\n\n{}", MAX_LOG_LINES, lines.len(), limited_content)
+            format!("... (showing last {} lines)\n\n{}", MAX_LOG_LINES, limited_content)
         } else {
             limited_content
         }
@@ -86,42 +88,63 @@ fn get_cached_log_content(log_path: &std::path::Path, log_index: usize, cache: &
     (content, true) // true = content changed
 }
 
-/// Get the log file path based on platform and log file index
-fn get_log_file_path(log_index: usize) -> PathBuf {
-    #[cfg(target_os = "linux")]
-    {
-        PathBuf::from(format!("/var/opt/lsiagent/lsiagent{}.log", log_index))
-    }
+/// Read at most the last `max_bytes` of a file (starting at a line boundary).
+fn read_file_tail(path: &std::path::Path, max_bytes: u64) -> std::io::Result<String> {
+    use std::io::{Read, Seek, SeekFrom};
 
-    #[cfg(target_os = "macos")]
-    {
-        PathBuf::from("/Library/Application Support/Lakeside Software/lsiagent.log")
+    let mut file = std::fs::File::open(path)?;
+    let len = file.metadata()?.len();
+    if len > max_bytes {
+        file.seek(SeekFrom::Start(len - max_bytes))?;
     }
-
-    #[cfg(target_os = "windows")]
-    {
-        PathBuf::from(format!("C:\\Program Files\\Lakeside Software\\LsiAgent{}.log", log_index))
-    }
-
-    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
-    {
-        // Fallback for other platforms
-        PathBuf::from(format!("/var/log/lsiagent{}.log", log_index))
-    }
-}
-
-/// Check which log files exist on the system
-pub fn get_available_log_files() -> Vec<usize> {
-    let mut available = Vec::new();
-    
-    for i in 0..10 {
-        let path = get_log_file_path(i);
-        if path.exists() {
-            available.push(i);
+    let mut buf = Vec::with_capacity(len.min(max_bytes) as usize);
+    file.read_to_end(&mut buf)?;
+    let mut content = String::from_utf8_lossy(&buf).into_owned();
+    // Drop the (likely partial) first line when we started mid-file
+    if len > max_bytes {
+        if let Some(nl) = content.find('\n') {
+            content.drain(..=nl);
         }
     }
-    
-    available
+    Ok(content)
+}
+
+/// Path of the known log at `log_index` (see paths::known_logs()).
+fn get_log_file_path(log_index: usize) -> PathBuf {
+    crate::paths::known_logs()
+        .get(log_index)
+        .map(|l| l.path.clone())
+        .unwrap_or_else(|| crate::paths::base_dir().join("lsiagent.log"))
+}
+
+/// Indices into paths::known_logs() of log files that exist on disk.
+pub fn get_available_log_files() -> Vec<usize> {
+    crate::paths::known_logs()
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| l.path.exists())
+        .map(|(i, _)| i)
+        .collect()
+}
+
+/// Label for one entry in the Logs tab strip, e.g. "[agent]".
+fn log_tab_label(name: &str) -> String {
+    format!("[{}]", name)
+}
+
+/// Map a click column on the log tab strip to a known-log index.
+/// Layout must mirror draw_logs: "LOGS: " prefix, then "[name] " per log.
+pub fn log_tab_hit(column: usize) -> Option<usize> {
+    let logs = crate::paths::known_logs();
+    let mut x = "LOGS: ".len();
+    for &idx in &get_available_log_files() {
+        let width = log_tab_label(&logs[idx].name).len();
+        if column >= x && column < x + width {
+            return Some(idx);
+        }
+        x += width + 1; // trailing space between tabs
+    }
+    None
 }
 
 pub async fn show_startup_animation(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> Result<()> {
@@ -132,9 +155,7 @@ pub async fn show_startup_animation(terminal: &mut Terminal<CrosstermBackend<std
     let is_root = unsafe { libc::geteuid() == 0 };
 
     // Define the final complete frames
-    let final_frames = vec![
-        // Frame 1: Header
-        vec![
+    let final_frames = [vec![
             Line::from(vec![Span::styled("[ S Y S T R A C K   S O F T W A R E   ( C ) 2000 ]", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))]),
             Line::from(vec![]),
             Line::from(vec![Span::styled("> INITIALIZING MODULE...", Style::default().fg(Color::Green))]),
@@ -191,13 +212,12 @@ pub async fn show_startup_animation(terminal: &mut Terminal<CrosstermBackend<std
                 Line::from(vec![Span::styled("  ███████╗███████║██║    ██║  ██║╚██████╔╝███████╗██║ ╚████║   ██║   ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))]),
                 Line::from(vec![Span::styled("  ╚══════╝╚══════╝╚═╝    ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝   ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))]),
                 Line::from(vec![]),
-                Line::from(vec![Span::styled("> STATUS: INOPERATIONAL", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))]),
+                Line::from(vec![Span::styled("> STATUS: DEGRADED", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))]),
                 Line::from(vec![]),
-                Line::from(vec![Span::styled("> ERROR: INSUFFICIENT PERMISSIONS", Style::default().fg(Color::Red))]),
-                Line::from(vec![Span::styled("> TRY LAUNCHING AS ADMIN", Style::default().fg(Color::Red))]),
+                Line::from(vec![Span::styled("> WARNING: NOT RUNNING AS ROOT", Style::default().fg(Color::Yellow))]),
+                Line::from(vec![Span::styled("> AGENT LOGS/CONFIG/DB MAY BE UNREADABLE — RELAUNCH WITH SUDO FOR FULL ACCESS", Style::default().fg(Color::Yellow))]),
             ]
-        },
-    ];
+        }];
 
     // Typing animation for each frame
     for (frame_index, final_frame) in final_frames.iter().enumerate() {
@@ -651,8 +671,12 @@ fn draw_overview(f: &mut Frame, area: Rect, app: &mut App) {
 
     // Key metrics with Pip-Boy style visualizer
     let stats = app.daemon_manager.get_process_stats();
-    let conn_status = app.network_monitor.get_connection_status();
-    let net_stats = app.network_monitor.get_network_stats();
+    let is_connected = app.network_monitor.is_connected();
+    let established = app.network_monitor.established();
+    let uplink_remote = established
+        .first()
+        .and_then(|c| c.remote.clone())
+        .unwrap_or_else(|| "-".to_string());
 
     // Split metrics area horizontally: left = visualizer, right = textual metrics
     let metric_chunks = Layout::default()
@@ -673,7 +697,7 @@ fn draw_overview(f: &mut Frame, area: Rect, app: &mut App) {
     } else {
         0
     };
-    let net_fill = if net_stats.data_flow_active { bar_height } else { 0 };
+    let net_fill = if is_connected { bar_height } else { 0 };
 
     // Compute a scanline position based on current time for animation
     let millis = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
@@ -685,15 +709,15 @@ fn draw_overview(f: &mut Frame, area: Rect, app: &mut App) {
         let mut line = String::new();
 
         // CPU column
-        if row < cpu_fill { line.push_str("█"); } else { line.push_str(" "); }
+        if row < cpu_fill { line.push('█'); } else { line.push(' '); }
         line.push(' ');
 
         // MEM column
-        if row < mem_fill { line.push_str("█"); } else { line.push_str(" "); }
+        if row < mem_fill { line.push('█'); } else { line.push(' '); }
         line.push(' ');
 
         // NET column
-        if row < net_fill { line.push_str("█"); } else { line.push_str(" "); }
+        if row < net_fill { line.push('█'); } else { line.push(' '); }
 
         // Add scanline marker overlay
         if row == scan_pos {
@@ -732,17 +756,17 @@ fn draw_overview(f: &mut Frame, area: Rect, app: &mut App) {
             Span::styled(format_memory(stats.memory_usage), Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
         ]),
         Line::from(vec![
-            Span::styled("CONNECTION: ", Style::default().fg(Color::Green)),
+            Span::styled("UPLINK: ", Style::default().fg(Color::Green)),
             Span::styled(
-                if conn_status.is_connected { "CONNECTED" } else { "DISCONNECTED" },
-                Style::default().fg(if conn_status.is_connected { Color::Green } else { Color::Red }).add_modifier(Modifier::BOLD),
+                if is_connected { "CONNECTED" } else { "DISCONNECTED" },
+                Style::default().fg(if is_connected { Color::Green } else { Color::Red }).add_modifier(Modifier::BOLD),
             ),
         ]),
         Line::from(vec![
-            Span::styled("DATA FLOW: ", Style::default().fg(Color::Green)),
+            Span::styled("REMOTE: ", Style::default().fg(Color::Green)),
             Span::styled(
-                if net_stats.data_flow_active { "ACTIVE" } else { "INACTIVE" },
-                Style::default().fg(if net_stats.data_flow_active { Color::Green } else { Color::Red }).add_modifier(Modifier::BOLD),
+                uplink_remote,
+                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
             ),
         ]),
     ];
@@ -756,27 +780,22 @@ fn draw_overview(f: &mut Frame, area: Rect, app: &mut App) {
 
     f.render_widget(metrics, metric_chunks[1]);
 
-    // Recent events - show systemctl status if available
-    let events_text = if app.daemon_manager.is_using_systemctl() {
-        match app.daemon_manager.get_service_status() {
-            Ok(status) => {
-                // Show the last few lines of systemctl status
-                let lines: Vec<&str> = status.lines().collect();
-                let recent_lines: Vec<String> = lines.iter().rev().take(5).rev().map(|s| s.to_string()).collect();
-                recent_lines.join("\n")
-            }
-            Err(e) => format!("Failed to get systemctl status: {}", e),
-        }
-    } else {
-        "systemctl not available - using direct process management".to_string()
-    };
+    // Service manager status (launchctl print / systemctl status), cached at 1 Hz
+    let max_lines = (chunks[2].height as usize).saturating_sub(2).max(5);
+    let events_text = app
+        .daemon_manager
+        .cached_service_status()
+        .lines()
+        .take(max_lines)
+        .collect::<Vec<&str>>()
+        .join("\n");
 
     let events = Paragraph::new(events_text)
         .wrap(Wrap { trim: true })
         .block(Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Green))
-            .title(" SERVICE LOGS ")
+            .title(format!(" SERVICE STATUS [{}] ", app.daemon_manager.manager().name()))
             .title_style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)));
 
     f.render_widget(events, chunks[2]);
@@ -829,11 +848,9 @@ fn draw_resources(f: &mut Frame, area: Rect, app: &mut App) {
     f.render_widget(memory, chunks[1]);
 
     // I/O Statistics
-    let io_text = format!("DISK READ: {} | WRITE: {}\nNET RX: {} | TX: {}",
+    let io_text = format!("DISK READ: {} | WRITE: {}",
         format_bytes(stats.disk_read_bytes),
-        format_bytes(stats.disk_write_bytes),
-        format_bytes(stats.network_rx_bytes),
-        format_bytes(stats.network_tx_bytes)
+        format_bytes(stats.disk_write_bytes)
     );
     let io_stats = Paragraph::new(io_text)
         .style(Style::default().fg(Color::Green))
@@ -846,13 +863,11 @@ fn draw_resources(f: &mut Frame, area: Rect, app: &mut App) {
     f.render_widget(io_stats, chunks[2]);
 
     // Process Details
-    let details_text = format!("PROCESS: {}\nPID: {:?} | PPID: {:?}\nSTATE: {} | PRIORITY: {}\nTHREADS: {} | OPEN FILES: {}\nUPTIME: {}s",
+    let details_text = format!("PROCESS: {}\nPID: {:?} | PPID: {:?}\nSTATE: {}\nOPEN FILES: {}\nUPTIME: {}s",
         app.daemon_manager.get_process_name(),
         stats.pid,
         stats.ppid,
         stats.state,
-        stats.priority,
-        stats.thread_count,
         stats.open_files,
         stats.uptime_seconds
     );
@@ -867,11 +882,7 @@ fn draw_resources(f: &mut Frame, area: Rect, app: &mut App) {
     f.render_widget(details, chunks[3]);
 
     // Additional Info
-    let additional_text = format!("START TIME: {}\nCONTEXT SWITCHES: {}\nPAGE FAULTS: {}",
-        format_timestamp(stats.start_time),
-        stats.context_switches,
-        stats.page_faults
-    );
+    let additional_text = format!("START TIME: {}", format_timestamp(stats.start_time));
     let additional = Paragraph::new(additional_text)
         .style(Style::default().fg(Color::Green))
         .block(Block::default()
@@ -887,60 +898,71 @@ fn draw_network(f: &mut Frame, area: Rect, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(4), // Connection status
-            Constraint::Length(4), // Traffic stats
-            Constraint::Min(1),    // Details
+            Constraint::Length(4), // Uplink summary
+            Constraint::Min(1),    // Connection table
         ])
         .split(area);
 
-    let conn_status = app.network_monitor.get_connection_status();
-    let net_stats = app.network_monitor.get_network_stats();
+    let is_connected = app.network_monitor.is_connected();
+    let established = app.network_monitor.established();
 
-    // Connection status
-    let conn_color = if conn_status.is_connected { Color::Green } else { Color::Red };
-    let conn_text = format!("STATUS: {}\nENDPOINT: {}\nDURATION: {:.1}s",
-        if conn_status.is_connected { "CONNECTED" } else { "DISCONNECTED" },
-        conn_status.endpoint,
-        conn_status.connection_duration.as_secs_f32()
-    );
-    let connection = Paragraph::new(conn_text)
+    // Uplink summary: the agent uploads to its master over a websocket, so an
+    // ESTABLISHED TCP connection is the practical "uplink up" signal.
+    let conn_color = if is_connected { Color::Green } else { Color::Red };
+    let summary = if let Some(err) = app.network_monitor.last_error() {
+        format!("STATUS: UNAVAILABLE\n{}", err)
+    } else if app.daemon_manager.get_pid().is_none() {
+        "STATUS: DAEMON NOT RUNNING".to_string()
+    } else if app.network_monitor.connections().is_empty() && unsafe { libc::geteuid() } != 0 {
+        "STATUS: UNAVAILABLE\nDAEMON RUNS AS ROOT — RELAUNCH LSMAN WITH SUDO TO SEE ITS SOCKETS".to_string()
+    } else {
+        format!(
+            "STATUS: {}\nESTABLISHED: {}",
+            if is_connected { "CONNECTED" } else { "NO ESTABLISHED CONNECTIONS" },
+            established
+                .iter()
+                .filter_map(|c| c.remote.as_deref())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+    let connection = Paragraph::new(summary)
         .style(Style::default().fg(conn_color))
         .block(Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Green))
-            .title(" CONNECTION STATUS ")
+            .title(" UPLINK ")
             .title_style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)));
 
     f.render_widget(connection, chunks[0]);
 
-    // Traffic stats
-    let traffic_text = format!("SENT: {} ({} PACKETS)\nRECEIVED: {} ({} PACKETS)\nDATA FLOW: {}",
-        format_bytes(net_stats.bytes_sent),
-        net_stats.packets_sent,
-        format_bytes(net_stats.bytes_received),
-        net_stats.packets_received,
-        if net_stats.data_flow_active { "ACTIVE" } else { "INACTIVE" }
+    // All open internet sockets of the daemon
+    let mut table = format!(
+        "{:<5} {:<26} {:<26} {}\n",
+        "PROTO", "LOCAL", "REMOTE", "STATE"
     );
-    let traffic = Paragraph::new(traffic_text)
+    for c in app.network_monitor.connections() {
+        table.push_str(&format!(
+            "{:<5} {:<26} {:<26} {}\n",
+            c.protocol,
+            c.local,
+            c.remote.as_deref().unwrap_or("-"),
+            c.state.as_deref().unwrap_or("-")
+        ));
+    }
+    if app.network_monitor.connections().is_empty() {
+        table.push_str("(no open sockets)\n");
+    }
+
+    let details = Paragraph::new(table)
         .style(Style::default().fg(Color::Green))
         .block(Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Green))
-            .title(" NETWORK TRAFFIC ")
+            .title(" OPEN SOCKETS (lsof) ")
             .title_style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)));
 
-    f.render_widget(traffic, chunks[1]);
-
-    // Additional details
-    let details = Paragraph::new("NETWORK MONITORING DETAILS WILL BE DISPLAYED HERE...")
-        .style(Style::default().fg(Color::Green))
-        .block(Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Green))
-            .title(" NETWORK ANALYSIS ")
-            .title_style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)));
-
-    f.render_widget(details, chunks[2]);
+    f.render_widget(details, chunks[1]);
 }
 
 fn draw_logs(f: &mut Frame, area: Rect, app: &mut App) {
@@ -984,11 +1006,7 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &mut App) {
         log_content.lines().count()
     };
     
-    let max_scroll = if content_lines > visible_height {
-        content_lines - visible_height
-    } else {
-        0
-    };
+    let max_scroll = content_lines.saturating_sub(visible_height);
     
     if app.logs_scroll > max_scroll as u16 {
         app.logs_scroll = max_scroll as u16;
@@ -1004,6 +1022,7 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &mut App) {
         app.last_log_content_len = 0;
     }
 
+    let known_logs = crate::paths::known_logs();
     let mut log_tabs = Vec::new();
 
     // If no logs found, add a placeholder
@@ -1011,21 +1030,17 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &mut App) {
         log_tabs.push(Span::styled("[NO LOGS FOUND]", Style::default().fg(Color::Red)));
     } else {
         for &log_idx in &available_logs {
-        let tab_text = if log_idx == app.current_log_file {
-            format!("[{}*]", log_idx)
-        } else {
-            format!("[{}]", log_idx)
-        };
-        
-        let style = if log_idx == app.current_log_file {
-            Style::default().fg(Color::Black).bg(Color::Green)
-        } else {
-            Style::default().fg(Color::Green)
-        };
-        
-        log_tabs.push(Span::styled(tab_text, style));
-        log_tabs.push(Span::raw(" "));
-    }
+            let tab_text = log_tab_label(&known_logs[log_idx].name);
+
+            let style = if log_idx == app.current_log_file {
+                Style::default().fg(Color::Black).bg(Color::Green)
+            } else {
+                Style::default().fg(Color::Green)
+            };
+
+            log_tabs.push(Span::styled(tab_text, style));
+            log_tabs.push(Span::raw(" "));
+        }
     }
 
     // Split the area for log tabs and content
@@ -1045,7 +1060,7 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &mut App) {
     composed_spans.push(Span::styled("LOGS: ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)));
 
     // Append the tab spans we already built
-    composed_spans.extend(log_tabs.into_iter());
+    composed_spans.extend(log_tabs);
 
     // Convert to a single Line and render inside a Paragraph without title
     let tabs_line = Line::from(composed_spans);
@@ -1056,7 +1071,11 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &mut App) {
     f.render_widget(tabs_paragraph, chunks[0]);
 
     // Draw log content
-    let title = format!(" LOG FILE {}: {} ", app.current_log_file, log_path.file_name().unwrap_or_default().to_string_lossy());
+    let log_name = known_logs
+        .get(app.current_log_file)
+        .map(|l| l.name.clone())
+        .unwrap_or_else(|| "?".to_string());
+    let title = format!(" {} — {} ", log_name.to_uppercase(), log_path.display());
 
     // Add line numbers to the log content for clarity
     let content_line_count = if let Some(cached) = app.log_cache.get(&app.current_log_file) {
@@ -1086,9 +1105,14 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &mut App) {
 }
 
 fn draw_config(f: &mut Frame, area: Rect, app: &mut App) {
-    let config_content = match std::fs::read_to_string("/var/opt/lsiagent/lsiagent.cfg") {
+    let config_path = crate::paths::config_path();
+    let config_content = match std::fs::read_to_string(&config_path) {
         Ok(content) => content,
-        Err(_) => "CONFIG FILE NOT FOUND OR ACCESS DENIED\n\nPATH: /var/opt/lsiagent/lsiagent.cfg\n\nThis file contains LSI Agent configuration settings.\nEnsure the daemon is properly installed and you have read permissions.\n\nYou can also check the example config file at: ./example/lsiagent.cfg".to_string(),
+        Err(e) => format!(
+            "CONFIG FILE NOT READABLE\n\nPATH: {}\nERROR: {}\n\nThis file contains LSI Agent configuration settings.\nEnsure the daemon is properly installed and you have read permissions\n(run lsman with sudo to read a root-owned config).",
+            config_path.display(),
+            e
+        ),
     };
     // Add line numbers to the configuration view
     let config_line_count = config_content.lines().count();
@@ -1125,23 +1149,25 @@ fn draw_settings(f: &mut Frame, area: Rect, _app: &mut App) {
 }
 
 fn draw_status_bar(f: &mut Frame, area: Rect, app: &mut App) {
-    let management_type = if app.daemon_manager.is_using_systemctl() {
-        "SYSTEMCTL"
-    } else {
-        "DIRECT"
-    };
+    let management_type = app.daemon_manager.manager().name();
 
     let base_status = format!(
-        " [F1-F6] NAV | [H/L/J/K] MOVE | [S] START | [X] STOP | [R] REFRESH | [Q] QUIT | [MOUSE] CLICK TABS | MODE: {} | INTERVAL: {}ms ",
-        management_type,
-        app.refresh_rate.as_millis()
+        " [F1-F6] NAV | [H/L/J/K] MOVE | [S] START | [X] STOP | [R] REFRESH | [Q] QUIT | MODE: {} ",
+        management_type
     );
 
-    let status_text = match app.current_tab {
+    let mut status_text = match app.current_tab {
         Tab::Config => format!("{} | [↑/↓] SCROLL | [PgUp/PgDn] PAGE | [MOUSE] WHEEL ", base_status),
-        Tab::Logs => format!("{} | [↑/↓] SCROLL | [PgUp/PgDn] PAGE | [MOUSE] WHEEL+TABS | [←/→] LOG FILE | [0-9] SELECT FILE ", base_status),
+        Tab::Logs => format!("{} | [↑/↓] SCROLL | [←/→] LOG FILE | [0-9] SELECT FILE ", base_status),
         _ => base_status,
     };
+
+    if let Some(msg) = &app.status_message {
+        status_text = format!(" {} | {}", msg, status_text.trim_start());
+    }
+    if unsafe { libc::geteuid() } != 0 {
+        status_text = format!(" ⚠ NOT ROOT (some agent files unreadable) |{}", status_text);
+    }
 
     let status = Paragraph::new(status_text)
         .style(Style::default().fg(Color::Green).bg(Color::Black))

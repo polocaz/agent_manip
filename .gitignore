@@ -19,3 +19,4 @@ Cargo.lock
 *.db
 *.cfg
 .env 
+.DS_Store
