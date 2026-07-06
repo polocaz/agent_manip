@@ -2,16 +2,20 @@
 
 use std::fs;
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, SystemTime};
 
 use anyhow::{anyhow, bail, Result};
 use clap::Subcommand;
 
+use crate::collect;
 use crate::daemon::{DaemonManager, DaemonState};
 use crate::network;
 use crate::paths;
+use crate::report;
+use crate::serve;
+use crate::triage::{self, is_error_line};
 
 #[derive(Subcommand)]
 pub enum CliCommand {
@@ -34,14 +38,20 @@ pub enum CliCommand {
         #[arg(long)]
         path: bool,
     },
-    /// Triage scan: find error/crash lines across the agent logs
+    /// Triage scan: group error/crash lines by the source site that logged them
     Errors {
         /// Restrict to one log name (default: all main agent logs)
         #[arg(long)]
         log: Option<String>,
-        /// Max matching lines to show per log file
+        /// Grouped mode: max groups to show; raw mode: max lines per log
         #[arg(short = 'n', long, default_value_t = 100)]
         lines: usize,
+        /// Only lines newer than this window, e.g. 90s, 30m, 24h, 7d
+        #[arg(long)]
+        since: Option<String>,
+        /// Print raw matching lines instead of the grouped summary
+        #[arg(long)]
+        raw: bool,
     },
     /// Print the agent config file (lsiagent.cfg)
     Config {
@@ -73,6 +83,40 @@ pub enum CliCommand {
     },
     /// Show the daemon's open network connections
     Net,
+    /// One-shot markdown diagnostic report (paste into a ticket)
+    Report {
+        /// Error-triage window, e.g. 24h (default: whole logs)
+        #[arg(long)]
+        since: Option<String>,
+        /// Write to a file instead of stdout
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+    /// Bundle report + config + capped logs + crash reports into a .tar.gz
+    Collect {
+        /// Directory to write the bundle into
+        #[arg(short, long, default_value = ".")]
+        output: PathBuf,
+        /// Keep at most this many MB (the tail) of each copied log
+        #[arg(long, default_value_t = 50)]
+        max_log_mb: u64,
+        /// Error-triage window for the included report, e.g. 24h
+        #[arg(long)]
+        since: Option<String>,
+    },
+    /// Serve a read-only web dashboard (status, error triage, log tails)
+    Serve {
+        #[arg(short, long, default_value_t = 7171)]
+        port: u16,
+        /// Bind address; the dashboard is unauthenticated, keep it loopback
+        #[arg(long, default_value = "127.0.0.1")]
+        bind: String,
+    },
+    /// Resolve a log line's <file>(<line>) to the agent source checkout
+    Where {
+        /// "webSocNix.cpp(120)", "webSocNix.cpp:120", or a pasted log line
+        reference: String,
+    },
     /// Start the daemon (launchctl / systemctl)
     Start,
     /// Stop the daemon (launchctl bootout / systemctl stop)
@@ -87,12 +131,25 @@ pub async fn run(command: CliCommand) -> Result<()> {
         CliCommand::Logs { name, lines, follow, errors, path } => {
             cmd_logs(name, lines, follow, errors, path)
         }
-        CliCommand::Errors { log, lines } => cmd_errors(log, lines),
+        CliCommand::Errors { log, lines, since, raw } => cmd_errors(log, lines, since, raw),
         CliCommand::Config { path } => cmd_config(path),
         CliCommand::Trace { level, restart } => cmd_trace(level, restart).await,
         CliCommand::Db { sql } => cmd_db(sql),
         CliCommand::Crashes { count, show } => cmd_crashes(count, show),
         CliCommand::Net => cmd_net().await,
+        CliCommand::Report { since, output } => cmd_report(since, output).await,
+        CliCommand::Collect { output, max_log_mb, since } => {
+            let tarball = collect::run(collect::CollectOptions {
+                output_dir: output,
+                max_log_mb,
+                since,
+            })
+            .await?;
+            println!("diagnostic bundle: {}", tarball.display());
+            Ok(())
+        }
+        CliCommand::Serve { port, bind } => serve::run(serve::ServeOptions { bind, port }).await,
+        CliCommand::Where { reference } => cmd_where(&reference),
         CliCommand::Start => cmd_daemon_control(DaemonAction::Start).await,
         CliCommand::Stop => cmd_daemon_control(DaemonAction::Stop).await,
         CliCommand::Restart => cmd_daemon_control(DaemonAction::Restart).await,
@@ -333,28 +390,92 @@ fn follow_log(path: &Path, errors_only: bool) -> Result<()> {
 // ---------------------------------------------------------------------------
 // errors
 
-/// Matches the first-pass triage pattern from the agent bug-investigation
-/// runbook: explicit error-level lines (" -E ") plus crash-ish keywords.
-fn is_error_line(line: &str) -> bool {
-    if line.contains(" -E ") {
-        return true;
-    }
-    let lower = line.to_lowercase();
-    ["crash", "abort", "exception", "failed"]
-        .iter()
-        .any(|kw| lower.contains(kw))
-}
-
-fn cmd_errors(log_name: Option<String>, max_lines: usize) -> Result<()> {
-    let logs: Vec<paths::KnownLog> = match log_name {
-        Some(name) => vec![paths::find_log(&name)
-            .ok_or_else(|| anyhow!("unknown log '{}' — run `lsman logs` to list names", name))?],
+fn errors_target_logs(log_name: Option<String>) -> Result<Vec<paths::KnownLog>> {
+    match log_name {
+        Some(name) => Ok(vec![paths::find_log(&name)
+            .ok_or_else(|| anyhow!("unknown log '{}' — run `lsman logs` to list names", name))?]),
         // Default to the main daemon log(s): agent / agent1..5
-        None => paths::known_logs()
+        None => Ok(paths::known_logs()
             .into_iter()
             .filter(|l| l.name.starts_with("agent"))
-            .collect(),
-    };
+            .collect()),
+    }
+}
+
+fn parse_since_arg(since: &Option<String>) -> Result<Option<chrono::Duration>> {
+    match since {
+        Some(s) => Ok(Some(triage::parse_since(s).ok_or_else(|| {
+            anyhow!("bad --since '{}' (use e.g. 90s, 30m, 24h, 7d)", s)
+        })?)),
+        None => Ok(None),
+    }
+}
+
+fn cmd_errors(
+    log_name: Option<String>,
+    max_lines: usize,
+    since: Option<String>,
+    raw: bool,
+) -> Result<()> {
+    let window = parse_since_arg(&since)?;
+    let logs = errors_target_logs(log_name)?;
+
+    if raw {
+        return cmd_errors_raw(logs, max_lines, window);
+    }
+
+    let scan = report::scan_errors_in(&logs, window, since.clone());
+    let label = since.map(|s| format!(" in the last {}", s)).unwrap_or_default();
+    if scan.groups.is_empty() {
+        println!("no error/crash lines found{}", label);
+    } else {
+        println!(
+            "{} error/crash lines across {} source sites{} (timestamps are UTC)\n",
+            scan.total_matches,
+            scan.groups.len(),
+            label
+        );
+        println!(
+            "{:<10} {:<34} {:>6}  {:<15} {:<15}",
+            "LOG", "SITE", "COUNT", "FIRST SEEN", "LAST SEEN"
+        );
+        for g in scan.groups.iter().take(max_lines) {
+            println!(
+                "{:<10} {:<34} {:>6}  {:<15} {:<15}",
+                g.log,
+                g.site,
+                g.count,
+                g.first_seen.as_deref().unwrap_or("-"),
+                g.last_seen.as_deref().unwrap_or("-")
+            );
+        }
+        if scan.groups.len() > max_lines {
+            println!("… and {} more sites (raise -n)", scan.groups.len() - max_lines);
+        }
+        println!("\nmost recent line per site:");
+        for g in scan.groups.iter().take(max_lines) {
+            println!("  {}", g.sample);
+        }
+        println!(
+            "\nresolve a site to source with: lsman where \"<site>\"  |  raw lines: lsman errors --raw"
+        );
+    }
+    if !scan.unreadable_logs.is_empty() {
+        println!(
+            "unreadable logs (permissions — try sudo): {}",
+            scan.unreadable_logs.join(", ")
+        );
+    }
+    Ok(())
+}
+
+fn cmd_errors_raw(
+    logs: Vec<paths::KnownLog>,
+    max_lines: usize,
+    window: Option<chrono::Duration>,
+) -> Result<()> {
+    let now = chrono::Utc::now();
+    let cutoff = window.map(|d| now.naive_utc() - d);
 
     println!("(log timestamps are UTC; <file>(<line>) in each entry points into the agent source)\n");
     let mut total = 0usize;
@@ -372,13 +493,20 @@ fn cmd_errors(log_name: Option<String>, max_lines: usize) -> Result<()> {
         let mut match_count = 0usize;
         for (line_no, line) in reader.lines().enumerate() {
             let Ok(line) = line else { continue };
-            if is_error_line(&line) {
-                match_count += 1;
-                if matches.len() == max_lines {
-                    matches.pop_front();
-                }
-                matches.push_back((line_no + 1, line));
+            if !is_error_line(&line) {
+                continue;
             }
+            if let Some(cutoff) = cutoff {
+                match triage::parse_line(&line, now).timestamp {
+                    Some(ts) if ts >= cutoff => {}
+                    _ => continue,
+                }
+            }
+            match_count += 1;
+            if matches.len() == max_lines {
+                matches.pop_front();
+            }
+            matches.push_back((line_no + 1, line));
         }
         total += match_count;
 
@@ -401,6 +529,163 @@ fn cmd_errors(log_name: Option<String>, max_lines: usize) -> Result<()> {
 
     if total == 0 {
         println!("no error/crash lines found");
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// report
+
+async fn cmd_report(since: Option<String>, output: Option<PathBuf>) -> Result<()> {
+    let window = parse_since_arg(&since)?;
+    let mut mgr = DaemonManager::new()?;
+    eprintln!("gathering diagnostic report…");
+    let mut snap = report::gather(&mut mgr).await;
+    snap.errors = Some(report::scan_errors(window, since));
+    let md = report::to_markdown(&snap);
+    match output {
+        Some(path) => {
+            fs::write(&path, md)?;
+            println!("report written to {}", path.display());
+        }
+        None => print!("{}", md),
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// where — log site -> agent source checkout
+
+/// Agent source roots to try, most specific first.
+fn agent_src_roots() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if let Ok(env_root) = std::env::var("LSMAN_AGENT_SRC") {
+        roots.push(PathBuf::from(env_root));
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        roots.push(PathBuf::from(&home).join("src/systrack/Agent"));
+        roots.push(PathBuf::from(&home).join("src/systrack-col1710/Agent"));
+    }
+    roots
+}
+
+/// Pull a `<file>` + `<line>` out of "f.cpp(120)", "f.cpp:120", a bare file
+/// name, or a whole pasted log line.
+fn parse_source_ref(reference: &str) -> Option<(String, u32)> {
+    let reference = reference.trim();
+    // A pasted log line: find the first token shaped like <file>(<line>)
+    if reference.contains(char::is_whitespace) {
+        return reference.split_whitespace().find_map(|tok| {
+            triage::split_site(tok).map(|(f, l)| (f.to_string(), l))
+        });
+    }
+    if let Some((file, line)) = triage::split_site(reference) {
+        return Some((file.to_string(), line));
+    }
+    if let Some((file, line)) = reference.rsplit_once(':') {
+        if let Ok(line) = line.parse() {
+            return Some((file.to_string(), line));
+        }
+    }
+    Some((reference.to_string(), 0))
+}
+
+/// The agent logs the source file without its extension (`dbConnNix(1119)`),
+/// so an extensionless query matches any source file with that stem.
+fn source_file_matches(fname: &str, query: &str) -> bool {
+    if fname.eq_ignore_ascii_case(query) {
+        return true;
+    }
+    if query.contains('.') {
+        return false;
+    }
+    match fname.rsplit_once('.') {
+        Some((stem, ext)) => {
+            matches!(ext.to_ascii_lowercase().as_str(), "cpp" | "c" | "cc" | "h" | "hpp" | "m" | "mm")
+                && stem.eq_ignore_ascii_case(query)
+        }
+        None => false,
+    }
+}
+
+fn find_file_named(dir: &Path, name: &str, hits: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let fname = entry.file_name().to_string_lossy().into_owned();
+        if fname.starts_with('.') {
+            continue;
+        }
+        let path = entry.path();
+        if path.is_dir() {
+            find_file_named(&path, name, hits);
+        } else if source_file_matches(&fname, name) {
+            hits.push(path);
+        }
+    }
+}
+
+fn cmd_where(reference: &str) -> Result<()> {
+    let (file, line) = parse_source_ref(reference)
+        .ok_or_else(|| anyhow!("no <file>(<line>) reference found in '{}'", reference))?;
+
+    let root = agent_src_roots()
+        .into_iter()
+        .find(|p| p.is_dir())
+        .ok_or_else(|| {
+            anyhow!(
+                "no agent source checkout found — set LSMAN_AGENT_SRC to your Agent/ directory"
+            )
+        })?;
+
+    let mut hits = Vec::new();
+    find_file_named(&root, &file, &mut hits);
+    if hits.is_empty() {
+        bail!("'{}' not found under {}", file, root.display());
+    }
+    // Implementation files first: they're what log sites almost always point at
+    hits.sort_by_key(|p| {
+        let ext = p.extension().map(|e| e.to_string_lossy().to_lowercase());
+        match ext.as_deref() {
+            Some("cpp" | "cc" | "c" | "m" | "mm") => 0,
+            _ => 1,
+        }
+    });
+
+    for hit in &hits {
+        if line > 0 {
+            println!("{}:{}", hit.display(), line);
+        } else {
+            println!("{}", hit.display());
+        }
+    }
+
+    // Show the emitting code from the first hit that actually has that line
+    if line > 0 {
+        let mut shown = false;
+        for hit in &hits {
+            let Ok(content) = fs::read_to_string(hit) else { continue };
+            let all: Vec<&str> = content.lines().collect();
+            let idx = (line as usize) - 1;
+            if idx >= all.len() {
+                continue;
+            }
+            println!();
+            let from = idx.saturating_sub(3);
+            let to = (idx + 4).min(all.len());
+            for (i, text) in all.iter().enumerate().take(to).skip(from) {
+                let marker = if i == idx { ">" } else { " " };
+                println!("{} {:>5} | {}", marker, i + 1, text);
+            }
+            shown = true;
+            break;
+        }
+        if !shown {
+            println!(
+                "\n(no matched file reaches line {} — the customer's agent build likely differs \
+                 from this checkout)",
+                line
+            );
+        }
     }
     Ok(())
 }
@@ -433,7 +718,7 @@ const LEVEL_NAMES: &[(&str, i64)] = &[
     ("trace5", 8),
 ];
 
-fn level_name(level: i64) -> &'static str {
+pub(crate) fn level_name(level: i64) -> &'static str {
     LEVEL_NAMES
         .iter()
         .find(|(_, v)| *v == level)
@@ -456,7 +741,7 @@ fn parse_level(s: &str) -> Result<i64> {
 }
 
 /// Read `LogLevel2` from the `[Debug]` section of lsiagent.cfg content.
-fn read_log_level(cfg: &str) -> Option<i64> {
+pub(crate) fn read_log_level(cfg: &str) -> Option<i64> {
     let mut in_debug = false;
     for line in cfg.lines() {
         let trimmed = line.trim();
@@ -602,20 +887,7 @@ fn cmd_db(sql: Option<String>) -> Result<()> {
 // crashes
 
 fn cmd_crashes(count: usize, show: Option<String>) -> Result<()> {
-    let mut reports: Vec<(SystemTime, std::path::PathBuf)> = Vec::new();
-    for dir in paths::crash_report_dirs() {
-        let Ok(entries) = fs::read_dir(&dir) else { continue };
-        for entry in entries.flatten() {
-            let fname = entry.file_name().to_string_lossy().into_owned();
-            if paths::CRASH_REPORT_PREFIXES.iter().any(|p| fname.starts_with(p)) {
-                if let Ok(meta) = entry.metadata() {
-                    let mtime = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
-                    reports.push((mtime, entry.path()));
-                }
-            }
-        }
-    }
-    reports.sort_by(|a, b| b.0.cmp(&a.0));
+    let reports = report::list_crash_reports();
 
     if reports.is_empty() {
         println!("no agent crash reports found in:");
@@ -736,7 +1008,7 @@ fn map_perm_error(e: std::io::Error, path: &Path) -> anyhow::Error {
     }
 }
 
-fn format_bytes(bytes: u64) -> String {
+pub(crate) fn format_bytes(bytes: u64) -> String {
     if bytes < 1024 {
         format!("{} B", bytes)
     } else if bytes < 1024 * 1024 {
@@ -748,11 +1020,11 @@ fn format_bytes(bytes: u64) -> String {
     }
 }
 
-fn format_kb(kb: u64) -> String {
+pub(crate) fn format_kb(kb: u64) -> String {
     format_bytes(kb * 1024)
 }
 
-fn format_duration(secs: u64) -> String {
+pub(crate) fn format_duration(secs: u64) -> String {
     if secs < 60 {
         format!("{}s", secs)
     } else if secs < 3600 {
@@ -827,9 +1099,36 @@ mod tests {
     }
 
     #[test]
-    fn error_line_detection() {
-        assert!(is_error_line("07-04 12:00:00 webSocNix.cpp(120) -E WebSock connect failed"));
-        assert!(is_error_line("something Exception thrown"));
-        assert!(!is_error_line("07-04 12:00:00 threadColl.cpp(88) -I Coll snapshot ok"));
+    fn source_ref_parsing() {
+        assert_eq!(
+            parse_source_ref("webSocNix.cpp(120)"),
+            Some(("webSocNix.cpp".to_string(), 120))
+        );
+        assert_eq!(
+            parse_source_ref("webSocNix.cpp:120"),
+            Some(("webSocNix.cpp".to_string(), 120))
+        );
+        assert_eq!(
+            parse_source_ref("07-04 09:15:42 webSocNix.cpp(120) -E connect failed"),
+            Some(("webSocNix.cpp".to_string(), 120))
+        );
+        assert_eq!(
+            parse_source_ref("dbConnNix.cpp"),
+            Some(("dbConnNix.cpp".to_string(), 0))
+        );
+        // real agent lines log the site without extension, padded into a column
+        assert_eq!(
+            parse_source_ref("07-02 12:13:32 DbUtils(5009)            -E        Failed to create"),
+            Some(("DbUtils".to_string(), 5009))
+        );
+    }
+
+    #[test]
+    fn source_file_stem_matching() {
+        assert!(source_file_matches("dbConnNix.cpp", "dbConnNix"));
+        assert!(source_file_matches("dbConnNix.h", "dbconnnix"));
+        assert!(source_file_matches("webSocNix.cpp", "webSocNix.cpp"));
+        assert!(!source_file_matches("dbConnNix.o", "dbConnNix"));
+        assert!(!source_file_matches("dbConnNixTest.cpp", "dbConnNix"));
     }
 }

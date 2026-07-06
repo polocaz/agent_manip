@@ -12,9 +12,13 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 
 mod app;
 mod cli;
+mod collect;
 mod daemon;
 mod network;
 mod paths;
+mod report;
+mod serve;
+mod triage;
 mod ui;
 
 use app::App;
