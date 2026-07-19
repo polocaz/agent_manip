@@ -316,10 +316,17 @@
 
   <section id="db">
     <div class="controls">
+      <input id="dbfindq" type="text" placeholder="search strings (e.g. app name)…" size="28">
+      <button class="act" id="dbfindbtn">find</button>
+      <span class="muted" id="dbfindinfo"></span>
+    </div>
+    <div class="muted">searches the SASTR/SASTRUSER string tables — inventory tables reference strings by ID, so <b>zero matches proves this endpoint has never seen it in any form</b></div>
+    <table id="dbstrings"></table>
+    <div class="controls">
       <button class="act" id="dbreload">reload tables</button>
       <span class="muted" id="dbinfo"></span>
     </div>
-    <div class="muted">read-only (<code>sqlite3 -readonly</code>) against the live agent database — click a table for its newest rows; the Overview tab's download serves a consistent <code>.backup</code> snapshot</div>
+    <div class="muted">read-only (<code>sqlite3 -readonly</code>) against the live agent database — click a table for its newest rows; integer string-IDs are auto-resolved to their SASTR/SASTRUSER values; the Overview tab's download serves a consistent <code>.backup</code> snapshot</div>
     <table id="dbtables"></table>
     <h2 id="dbrowshdr" style="display:none"></h2>
     <div class="muted" id="dbrowsnote"></div>
@@ -842,6 +849,10 @@ async function loadDbTables() {
 $("dbreload").onclick = loadDbTables;
 
 const cell = v => v == null ? '<span class="muted">null</span>' : esc(String(v).length > 200 ? String(v).slice(0, 200) + "…" : v);
+// String-ID cell: show the resolved SASTR/SASTRUSER value with the raw id
+// dimmed beside it; anything unresolved falls through to the plain cell.
+const dbCell = (v, map) => (map && v != null && map[v] !== undefined)
+  ? `${cell(map[v])} <span class="muted">#${v}</span>` : cell(v);
 
 $("dbtables").onclick = async e => {
   const row = e.target.closest("tr.rowlink");
@@ -856,13 +867,42 @@ $("dbtables").onclick = async e => {
     $("dbrowshdr").textContent = name;
     if (!data.rows.length) { $("dbrowsnote").textContent = "empty table"; $("dbrows").innerHTML = ""; return; }
     const cols = Object.keys(data.rows[0]);
-    $("dbrowsnote").textContent = data.rows.length + " rows shown (newest first, max 50; long values clipped)";
-    $("dbrows").innerHTML = "<tr>" + cols.map(c => `<th>${esc(c)}</th>`).join("") + "</tr>" +
-      data.rows.map(r0 => "<tr>" + cols.map(c => `<td>${cell(r0[c])}</td>`).join("") + "</tr>").join("");
+    const res = data.resolved || {};
+    const anyResolved = Object.keys(res).length > 0;
+    $("dbrowsnote").textContent = data.rows.length + " rows shown (newest first, max 50; long values clipped" +
+      (anyResolved ? "; * = string-IDs resolved via SASTR/SASTRUSER" : "") + ")";
+    $("dbrows").innerHTML = "<tr>" + cols.map(c =>
+      `<th title="${res[c] ? "string-IDs resolved via SASTR/SASTRUSER" : ""}">${esc(c)}${res[c] ? "*" : ""}</th>`).join("") + "</tr>" +
+      data.rows.map(r0 => "<tr>" + cols.map(c => `<td>${dbCell(r0[c], res[c])}</td>`).join("") + "</tr>").join("");
   } catch (err) {
     $("dbrowsnote").textContent = "request failed: " + err;
   }
 };
+
+// --- string search ("has this endpoint ever seen X?") ---------------------------
+async function dbFindStrings() {
+  const q = $("dbfindq").value.trim();
+  if (q.length < 2) { $("dbfindinfo").textContent = "need at least 2 characters"; return; }
+  $("dbfindinfo").textContent = "searching…";
+  try {
+    const r = await fetch("/api/db/strings?q=" + encodeURIComponent(q));
+    const data = await r.json();
+    if (data.error) { $("dbfindinfo").textContent = data.error; return; }
+    if (!data.rows.length) {
+      $("dbfindinfo").textContent = `no matches — this endpoint has never seen "${q}" in any form`;
+      $("dbstrings").innerHTML = "";
+      return;
+    }
+    $("dbfindinfo").textContent = data.rows.length + " match" + (data.rows.length === 1 ? "" : "es") +
+      (data.rows.length >= data.limit ? " (capped — narrow the pattern)" : "");
+    $("dbstrings").innerHTML = "<tr><th>scope</th><th>string-id</th><th>value</th></tr>" +
+      data.rows.map(s => `<tr><td>${esc(s.scope)}</td><td>${s.STRINGID}</td><td>${cell(s.STRVALUE)}</td></tr>`).join("");
+  } catch (e) {
+    $("dbfindinfo").textContent = "request failed: " + e;
+  }
+}
+$("dbfindbtn").onclick = dbFindStrings;
+$("dbfindq").addEventListener("keydown", e => { if (e.key === "Enter") dbFindStrings(); });
 
 // --- quick trace level ----------------------------------------------------------
 $("traceapply").onclick = async () => {

@@ -143,6 +143,10 @@ fn handle_request(
             Ok(resp) => resp,
             Err(e) => error_response(400, &e.to_string()),
         },
+        "/api/db/strings" => match api_db_strings(query) {
+            Ok(resp) => resp,
+            Err(e) => error_response(400, &e.to_string()),
+        },
         "/api/daemon/start" | "/api/daemon/stop" | "/api/daemon/restart" => {
             if *request.method() != tiny_http::Method::Post {
                 error_response(405, "POST required")
@@ -427,89 +431,36 @@ fn attachment(resp: tiny_http::Response<fs::File>, filename: &str) -> HttpRespon
         .boxed()
 }
 
-/// Run read-only SQL against the live agent DB, returning sqlite3's -json
-/// output (an empty result set prints nothing — normalized to `[]`).
-fn db_query_json(sql: &str) -> Result<serde_json::Value> {
-    let db = paths::database_path();
-    if !db.exists() {
-        bail!("database not found at {}", db.display());
-    }
-    let out = Command::new("sqlite3")
-        .arg("-readonly")
-        .arg("-json")
-        .arg(&db)
-        .arg(sql)
-        .output()
-        .map_err(|e| anyhow!("running sqlite3: {}", e))?;
-    if !out.status.success() {
-        let hint = if unsafe { libc::geteuid() } != 0 {
-            " — the database is root-owned; run lsman serve with sudo"
-        } else {
-            ""
-        };
-        bail!(
-            "sqlite3: {}{}",
-            String::from_utf8_lossy(&out.stderr).trim(),
-            hint
-        );
-    }
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    let trimmed = stdout.trim();
-    if trimmed.is_empty() {
-        return Ok(serde_json::Value::Array(Vec::new()));
-    }
-    serde_json::from_str(trimmed).map_err(|e| anyhow!("parsing sqlite3 -json output: {}", e))
-}
-
-fn db_table_names() -> Result<Vec<String>> {
-    let rows = db_query_json(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name;",
-    )?;
-    Ok(rows
-        .as_array()
-        .map(|a| {
-            a.iter()
-                .filter_map(|r| r.get("name")?.as_str().map(str::to_string))
-                .collect()
-        })
-        .unwrap_or_default())
-}
-
 fn api_db_tables() -> Result<HttpResponse> {
-    let names = db_table_names()?;
-    if names.is_empty() {
-        return Ok(json_response(&serde_json::json!({ "tables": [] })));
-    }
-    // One pass for all row counts; names come from sqlite_master, quoted with
-    // "" doubling so odd table names can't break out of the identifier.
-    let sql = names
-        .iter()
-        .map(|n| {
-            let q = n.replace('"', "\"\"");
-            format!("SELECT '{}' AS name, count(*) AS n FROM \"{}\"", n.replace('\'', "''"), q)
-        })
-        .collect::<Vec<_>>()
-        .join(" UNION ALL ")
-        + ";";
-    let tables = db_query_json(&sql)?;
+    let tables = crate::db::table_counts()?;
     Ok(json_response(&serde_json::json!({ "tables": tables })))
 }
 
 fn api_db_table(query: &str) -> Result<HttpResponse> {
     let name = query_param(query, "name").ok_or_else(|| anyhow!("missing ?name="))?;
-    // Only tables that actually exist in the DB — never raw identifiers.
-    if !db_table_names()?.contains(&name) {
-        bail!("unknown table '{}'", name);
-    }
-    let q = name.replace('"', "\"\"");
-    // Newest rows first where there's a rowid; WITHOUT ROWID tables get the
-    // plain fallback.
-    let rows = db_query_json(&format!(
-        "SELECT * FROM \"{}\" ORDER BY rowid DESC LIMIT 50;",
-        q
+    // db::table_rows validates the name against the DB's actual table list —
+    // never raw identifiers from the client.
+    let rows = crate::db::table_rows(&name, 50)?;
+    // SysTrack tables store names as integer string-IDs; ship the id→string
+    // map alongside so the dashboard can render human-readable rows.
+    let resolved = crate::db::resolve_string_ids(&rows);
+    Ok(json_response(
+        &serde_json::json!({ "name": name, "rows": rows, "resolved": resolved }),
     ))
-    .or_else(|_| db_query_json(&format!("SELECT * FROM \"{}\" LIMIT 50;", q)))?;
-    Ok(json_response(&serde_json::json!({ "name": name, "rows": rows })))
+}
+
+/// Substring search over SASTR/SASTRUSER — "has this endpoint ever seen X".
+/// Zero matches is conclusive: nothing in the DB can reference a string that
+/// isn't in the string tables.
+fn api_db_strings(query: &str) -> Result<HttpResponse> {
+    let q = query_param(query, "q").unwrap_or_default();
+    if q.trim().len() < 2 {
+        bail!("need ?q= of at least 2 characters");
+    }
+    let rows = crate::db::search_strings(q.trim(), 200)?;
+    Ok(json_response(
+        &serde_json::json!({ "q": q.trim(), "rows": rows, "limit": 200 }),
+    ))
 }
 
 static COLLECT_SEQ: AtomicU64 = AtomicU64::new(0);

@@ -14,6 +14,7 @@ mod app;
 mod cli;
 mod collect;
 mod daemon;
+mod db;
 mod network;
 mod paths;
 mod report;

@@ -28,8 +28,15 @@ pub fn config_path() -> PathBuf {
     base_dir().join("lsiagent.cfg")
 }
 
-/// Agent SQLite database.
+/// Agent SQLite database. `LSMAN_DB` overrides it so `lsman db`/the dashboard
+/// can inspect an offline snapshot (e.g. a support drop's collect_copy.sqlite3)
+/// instead of the live install.
 pub fn database_path() -> PathBuf {
+    if let Ok(p) = std::env::var("LSMAN_DB") {
+        if !p.is_empty() {
+            return PathBuf::from(p);
+        }
+    }
     base_dir().join("database").join("collect.sqlite3")
 }
 
