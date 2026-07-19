@@ -33,6 +33,12 @@ pub fn database_path() -> PathBuf {
     base_dir().join("database").join("collect.sqlite3")
 }
 
+/// Master-delivered agent profile blob, written next to the config
+/// (verified on a live macOS agent install; root-only permissions).
+pub fn profile_path() -> PathBuf {
+    base_dir().join("profile")
+}
+
 /// Daemon binary location.
 pub fn daemon_binary() -> PathBuf {
     if cfg!(target_os = "macos") {

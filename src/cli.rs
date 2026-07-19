@@ -104,7 +104,7 @@ pub enum CliCommand {
         #[arg(long)]
         since: Option<String>,
     },
-    /// Serve a read-only web dashboard (status, error triage, log tails)
+    /// Serve a web dashboard (status, errors, logs, daemon control, downloads, cfg editor)
     Serve {
         #[arg(short, long, default_value_t = 7171)]
         port: u16,
@@ -762,7 +762,7 @@ pub(crate) fn read_log_level(cfg: &str) -> Option<i64> {
 
 /// Return cfg content with `LogLevel2=<level>` set in the `[Debug]` section,
 /// creating the key or section as needed. Preserves everything else.
-fn set_log_level(cfg: &str, level: i64) -> String {
+pub(crate) fn set_log_level(cfg: &str, level: i64) -> String {
     let mut lines: Vec<String> = cfg.lines().map(|l| l.to_string()).collect();
     let mut in_debug = false;
     let mut debug_header_idx: Option<usize> = None;
