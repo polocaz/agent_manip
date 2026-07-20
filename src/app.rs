@@ -196,14 +196,12 @@ impl App {
                     self.step_log(true);
                 }
             }
-            KeyCode::Char(c @ '0'..='9') => {
+            KeyCode::Char(c @ '0'..='9') if self.current_tab == Tab::Logs => {
                 // Digit N jumps to the Nth available log
-                if self.current_tab == Tab::Logs {
-                    if let Some(digit) = c.to_digit(10) {
-                        let available = crate::ui::get_available_log_files();
-                        if let Some(&idx) = available.get(digit as usize) {
-                            self.select_log(idx);
-                        }
+                if let Some(digit) = c.to_digit(10) {
+                    let available = crate::ui::get_available_log_files();
+                    if let Some(&idx) = available.get(digit as usize) {
+                        self.select_log(idx);
                     }
                 }
             }

@@ -322,15 +322,88 @@
     </div>
     <div class="muted">searches the SASTR/SASTRUSER string tables — inventory tables reference strings by ID, so <b>zero matches proves this endpoint has never seen it in any form</b></div>
     <table id="dbstrings"></table>
-    <div class="controls">
+    <div class="controls" style="margin-top: 1rem; display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem;">
       <button class="act" id="dbreload">reload tables</button>
       <span class="muted" id="dbinfo"></span>
+      <div style="display: flex; align-items: center; gap: 0.35rem; margin-left: auto;">
+        <label for="dbtablefilter" class="muted">Filter tables:</label>
+        <input id="dbtablefilter" type="text" placeholder="e.g. APP, SFW, USER…" size="24">
+        <span class="muted" id="dbtablecount"></span>
+      </div>
     </div>
-    <div class="muted">read-only (<code>sqlite3 -readonly</code>) against the live agent database — click a table for its newest rows; integer string-IDs are auto-resolved to their SASTR/SASTRUSER values; the Overview tab's download serves a consistent <code>.backup</code> snapshot</div>
-    <table id="dbtables"></table>
-    <h2 id="dbrowshdr" style="display:none"></h2>
-    <div class="muted" id="dbrowsnote"></div>
-    <div style="overflow:auto"><table id="dbrows"></table></div>
+    <div class="muted">read-only (<code>sqlite3 -readonly</code>) against the live agent database — click any table to explore rows, filter/search across columns, sort, paginate, and view C++ header schema descriptions (`from ~/src/systrack/Agent/LsiAgent/Tables`).</div>
+    <div style="max-height: 220px; overflow-y: auto; margin-bottom: 1.25rem; border: 1px solid var(--border, #333); padding: 2px;">
+      <table id="dbtables" style="margin: 0; width: 100%;"></table>
+    </div>
+
+    <div style="margin-bottom: 1.25rem; padding: 0.75rem; background: rgba(0, 255, 102, 0.05); border: 1px solid var(--border, #333); border-left: 4px solid var(--accent, #00ff66);">
+      <div style="font-weight: bold; color: var(--accent, #00ff66); margin-bottom: 0.35rem;">🌳 Process Tree & Ancestry Explorer</div>
+      <div class="controls" style="margin-bottom: 0.35rem; display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;">
+        <input id="dbtreeq" type="text" placeholder="enter PID or app name (e.g. 724 or gamemode or 7zip)..." size="32">
+        <button class="act" id="dbtreebtn">inspect tree & hierarchy</button>
+        <button id="dbtreeclear">clear</button>
+        <span class="muted" id="dbtreeinfo"></span>
+      </div>
+      <div class="muted" style="font-size: 0.85rem;">resolves and maps the exact application parent-to-child hierarchy (<code>SAPROCESSTREE</code> / <code>SAAPP</code> / <code>SASTR</code>) from root PID 1 down to spawned child processes and resource metrics.</div>
+      <div id="dbtreeview" style="display:none; margin-top: 0.75rem; padding: 0.75rem; background: #0a0e0a; border: 1px solid #1f3b1f; max-height: 480px; overflow-y: auto;"></div>
+    </div>
+
+    <div id="dbexplorer" style="display:none; border-top: 2px solid var(--accent, #00ff66); padding-top: 1rem;">
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.5rem;">
+        <div>
+          <h2 id="dbrowshdr" style="margin: 0; display: inline-block;"></h2>
+          <span class="muted" id="dbrowsnote" style="margin-left: 0.75rem;"></span>
+        </div>
+        <div class="controls" style="margin: 0;">
+          <button id="dbschematoggle">view schema & descriptions</button>
+          <button id="dbwraptoggle">wrap long cells: off</button>
+        </div>
+      </div>
+
+      <div class="controls" style="background: rgba(0,255,102,0.05); padding: 0.5rem; border: 1px solid var(--border, #333); margin-bottom: 0.75rem; display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center;">
+        <div style="display: flex; align-items: center; gap: 0.35rem;">
+          <label for="dbfilterq" class="muted">Filter rows:</label>
+          <input id="dbfilterq" type="text" placeholder="search text or resolved strings..." size="28">
+          <button class="act" id="dbfilterbtn">filter</button>
+          <button id="dbfilterclear">clear</button>
+        </div>
+        <div style="display: flex; align-items: center; gap: 0.35rem;">
+          <label for="dblimit" class="muted">Rows/page:</label>
+          <select id="dblimit">
+            <option value="25">25</option>
+            <option value="50">50</option>
+            <option value="100" selected>100</option>
+            <option value="250">250</option>
+            <option value="500">500</option>
+            <option value="1000">1000</option>
+          </select>
+        </div>
+        <div style="display: flex; align-items: center; gap: 0.35rem; margin-left: auto;">
+          <button id="dbpagefirst" title="First page">|&lt;</button>
+          <button id="dbpageprev" title="Previous page">&lt; prev</button>
+          <span id="dbpageinfo" class="muted">Page 1</span>
+          <button id="dbpagenext" title="Next page">next &gt;</button>
+          <button id="dbpagelast" title="Last page">&gt;|&button>
+        </div>
+      </div>
+
+      <div id="dbschemaview" style="display: none; background: #111; border: 1px solid #444; padding: 0.75rem; margin-bottom: 0.75rem; max-height: 260px; overflow: auto;">
+        <h3 style="margin-top: 0; margin-bottom: 0.5rem; font-size: 0.95rem;">Table Schema & Column Descriptions (from C++ Headers)</h3>
+        <table id="dbschematable" style="margin: 0; width: 100%;"></table>
+      </div>
+
+      <div style="overflow:auto; max-height: 580px;"><table id="dbrows"></table></div>
+
+      <!-- Row Inspector Modal -->
+      <div id="dbrowmodal" style="display:none; position: fixed; top: 8%; left: 10%; right: 10%; max-height: 84vh; background: #0a0e0a; border: 2px solid #00ff66; z-index: 1000; padding: 1.25rem; overflow-y: auto; box-shadow: 0 0 25px rgba(0,255,102,0.4);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; border-bottom: 1px solid #222; padding-bottom: 0.5rem;">
+          <h3 id="dbrowmodaltit" style="margin: 0; color: #00ff66;">Row Inspector</h3>
+          <button id="dbrowmodalclose" class="act">close [X]</button>
+        </div>
+        <div class="muted" style="margin-bottom: 0.75rem;">Click any value to copy or inspect. Shows complete unclipped values alongside string resolutions and C++ schema descriptions.</div>
+        <table id="dbrowmodaltable" style="width: 100%;"></table>
+      </div>
+    </div>
   </section>
 </main>
 
@@ -831,7 +904,26 @@ addEventListener("keydown", e => {
   if (n >= 1 && n <= tabs.length) tabs[n - 1].click();
 });
 
-// --- database inspector --------------------------------------------------------
+// --- database explorer & row inspector ------------------------------------------
+let dbCurrentTable = null;
+let dbLimit = 100;
+let dbOffset = 0;
+let dbSort = "rowid";
+let dbDir = "desc";
+let dbFilterQ = "";
+let dbWrapLong = false;
+let dbLastData = null;
+
+function renderTableList() {
+  if (!dbTables) return;
+  const q = ($("dbtablefilter").value || "").toLowerCase();
+  const filtered = dbTables.filter(t => t.name.toLowerCase().includes(q));
+  $("dbtablecount").textContent = `${filtered.length} of ${dbTables.length} tables`;
+  $("dbtables").innerHTML = "<tr><th style='position:sticky; top:0; background:#000; z-index:2;'>table</th><th style='position:sticky; top:0; background:#000; z-index:2;'>rows</th></tr>" +
+    filtered.map(t => `<tr class="rowlink" data-table="${esc(t.name)}" style="${dbCurrentTable === t.name ? 'background:rgba(0,255,102,0.15);' : ''}"><td>${esc(t.name)}</td><td>${t.n}</td></tr>`).join("");
+}
+$("dbtablefilter").addEventListener("input", renderTableList);
+
 async function loadDbTables() {
   $("dbinfo").textContent = "loading…";
   try {
@@ -839,9 +931,8 @@ async function loadDbTables() {
     const data = await r.json();
     if (data.error) { $("dbinfo").textContent = data.error; return; }
     dbTables = data.tables;
-    $("dbinfo").textContent = dbTables.length + " tables";
-    $("dbtables").innerHTML = "<tr><th>table</th><th>rows</th></tr>" +
-      dbTables.map(t => `<tr class="rowlink" data-table="${esc(t.name)}"><td>${esc(t.name)}</td><td>${t.n}</td></tr>`).join("");
+    $("dbinfo").textContent = dbTables.length + " tables total";
+    renderTableList();
   } catch (e) {
     $("dbinfo").textContent = "request failed: " + e;
   }
@@ -849,35 +940,201 @@ async function loadDbTables() {
 $("dbreload").onclick = loadDbTables;
 
 const cell = v => v == null ? '<span class="muted">null</span>' : esc(String(v).length > 200 ? String(v).slice(0, 200) + "…" : v);
-// String-ID cell: show the resolved SASTR/SASTRUSER value with the raw id
-// dimmed beside it; anything unresolved falls through to the plain cell.
-const dbCell = (v, map) => (map && v != null && map[v] !== undefined)
-  ? `${cell(map[v])} <span class="muted">#${v}</span>` : cell(v);
+const dbCell = (v, map, col) => {
+  let base = (map && v != null && map[v] !== undefined)
+    ? `${cell(map[v])} <span class="muted">#${v}</span>` : cell(v);
+  if (col && (col.toUpperCase() === "PROCESS_ID" || col.toUpperCase() === "PARENTPID") && v != null && !isNaN(v) && +v > 0) {
+    base += ` <a href="#" class="dbtreelink" data-pid="${v}" title="Inspect Process Tree for PID ${v}" style="color:#00ff66; text-decoration:none; border:1px solid #00ff66; border-radius:3px; padding:0 3px; font-size:0.75em; margin-left:4px;">🌳 tree</a>`;
+  }
+  return base;
+};
 
-$("dbtables").onclick = async e => {
-  const row = e.target.closest("tr.rowlink");
-  if (!row) return;
-  const name = row.dataset.table;
-  $("dbrowsnote").textContent = "loading " + name + "…";
+async function loadDbTableData() {
+  if (!dbCurrentTable) return;
+  $("dbrowsnote").textContent = "loading " + dbCurrentTable + "…";
+  $("dbrows").innerHTML = "<tr><td class='muted'>Fetching rows...</td></tr>";
   try {
-    const r = await fetch("/api/db/table?name=" + encodeURIComponent(name));
+    const url = `/api/db/table?name=${encodeURIComponent(dbCurrentTable)}&limit=${dbLimit}&offset=${dbOffset}&sort=${encodeURIComponent(dbSort)}&dir=${dbDir}&q=${encodeURIComponent(dbFilterQ)}`;
+    const r = await fetch(url);
     const data = await r.json();
     if (data.error) { $("dbrowsnote").textContent = data.error; return; }
-    $("dbrowshdr").style.display = "";
-    $("dbrowshdr").textContent = name;
-    if (!data.rows.length) { $("dbrowsnote").textContent = "empty table"; $("dbrows").innerHTML = ""; return; }
-    const cols = Object.keys(data.rows[0]);
+    dbLastData = data;
+    $("dbexplorer").style.display = "";
+    $("dbrowshdr").textContent = dbCurrentTable;
+    
+    const total = data.total_rows !== undefined ? data.total_rows : data.rows.length;
+    const filtered = data.filtered_rows !== undefined ? data.filtered_rows : data.rows.length;
+    const isFiltered = dbFilterQ !== "";
+    const startRow = filtered > 0 ? data.offset + 1 : 0;
+    const endRow = Math.min(data.offset + data.rows.length, filtered);
+    
+    $("dbrowsnote").textContent = `${startRow} - ${endRow} of ${filtered} rows` +
+      (isFiltered ? ` (filtered from ${total} total)` : "") +
+      ` | Sorted by ${data.sort} (${data.dir.toUpperCase()})`;
+
+    const curPage = Math.floor(data.offset / data.limit) + 1;
+    const totalPages = Math.max(1, Math.ceil(filtered / data.limit));
+    $("dbpageinfo").textContent = `Page ${curPage} of ${totalPages}`;
+    $("dbpagefirst").disabled = curPage <= 1;
+    $("dbpageprev").disabled = curPage <= 1;
+    $("dbpagenext").disabled = curPage >= totalPages;
+    $("dbpagelast").disabled = curPage >= totalPages;
+
+    const cols = data.rows.length > 0 ? Object.keys(data.rows[0]) : Object.keys(data.descriptions || {});
     const res = data.resolved || {};
-    const anyResolved = Object.keys(res).length > 0;
-    $("dbrowsnote").textContent = data.rows.length + " rows shown (newest first, max 50; long values clipped" +
-      (anyResolved ? "; * = string-IDs resolved via SASTR/SASTRUSER" : "") + ")";
-    $("dbrows").innerHTML = "<tr>" + cols.map(c =>
-      `<th title="${res[c] ? "string-IDs resolved via SASTR/SASTRUSER" : ""}">${esc(c)}${res[c] ? "*" : ""}</th>`).join("") + "</tr>" +
-      data.rows.map(r0 => "<tr>" + cols.map(c => `<td>${dbCell(r0[c], res[c])}</td>`).join("") + "</tr>").join("");
+    const descs = data.descriptions || {};
+    
+    if (cols.length === 0) {
+      $("dbrows").innerHTML = "<tr><td class='muted'>Table has no rows matching the filter.</td></tr>";
+    } else {
+      $("dbschematable").innerHTML = "<tr><th>column</th><th>string-id resolved</th><th>C++ header description</th></tr>" +
+        cols.map(c => `<tr><td style="font-weight:bold; color:#00ff66;">${esc(c)}</td><td>${res[c] ? "Yes (SASTR/SASTRUSER)" : "No"}</td><td class="muted">${esc(descs[c] || "—")}</td></tr>`).join("");
+
+      $("dbrows").innerHTML = "<tr>" + cols.map(c => {
+        const isSortCol = data.sort.toLowerCase() === c.toLowerCase();
+        const sortIcon = isSortCol ? (data.dir === "asc" ? " ▲" : " ▼") : "";
+        const titleText = (descs[c] ? descs[c] + ". " : "") + (res[c] ? "String-IDs resolved via SASTR/SASTRUSER. " : "") + "Click to sort by " + c;
+        return `<th class="dbsortth" data-col="${esc(c)}" title="${esc(titleText)}" style="cursor:pointer; white-space:nowrap; position:sticky; top:0; background:#000; z-index:1;">` +
+          `${esc(c)}${res[c] ? "*" : ""}${sortIcon}` +
+          (descs[c] ? `<br><span class="muted" style="font-size:0.75em; font-weight:normal;">${esc(descs[c])}</span>` : "") +
+          `</th>`;
+      }).join("") + "</tr>" +
+      data.rows.map((r0, idx) => `<tr class="dbrowitem" data-rowidx="${idx}" style="cursor:pointer;" title="Click row to open Row Inspector">` +
+        cols.map(c => `<td style="${dbWrapLong ? 'white-space:pre-wrap; word-break:break-all;' : 'white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:260px;'}">${dbCell(r0[c], res[c], c)}</td>`).join("") +
+        "</tr>").join("");
+    }
   } catch (err) {
     $("dbrowsnote").textContent = "request failed: " + err;
   }
+}
+
+$("dbtables").onclick = e => {
+  const row = e.target.closest("tr.rowlink");
+  if (!row) return;
+  const name = row.dataset.table;
+  if (dbCurrentTable !== name) {
+    dbCurrentTable = name;
+    dbOffset = 0;
+    dbSort = "rowid";
+    dbDir = "desc";
+    dbFilterQ = "";
+    $("dbfilterq").value = "";
+    renderTableList();
+  }
+  loadDbTableData();
 };
+
+$("dbfilterbtn").onclick = () => {
+  dbFilterQ = $("dbfilterq").value.trim();
+  dbOffset = 0;
+  loadDbTableData();
+};
+$("dbfilterclear").onclick = () => {
+  $("dbfilterq").value = "";
+  dbFilterQ = "";
+  dbOffset = 0;
+  loadDbTableData();
+};
+$("dbfilterq").addEventListener("keydown", e => {
+  if (e.key === "Enter") {
+    dbFilterQ = $("dbfilterq").value.trim();
+    dbOffset = 0;
+    loadDbTableData();
+  }
+});
+
+$("dblimit").onchange = e => {
+  dbLimit = +e.target.value || 100;
+  dbOffset = 0;
+  loadDbTableData();
+};
+
+$("dbpagefirst").onclick = () => { dbOffset = 0; loadDbTableData(); };
+$("dbpageprev").onclick = () => { dbOffset = Math.max(0, dbOffset - dbLimit); loadDbTableData(); };
+$("dbpagenext").onclick = () => {
+  if (dbLastData && dbLastData.filtered_rows > dbOffset + dbLimit) {
+    dbOffset += dbLimit;
+    loadDbTableData();
+  }
+};
+$("dbpagelast").onclick = () => {
+  if (dbLastData && dbLastData.filtered_rows > 0) {
+    const totalPages = Math.ceil(dbLastData.filtered_rows / dbLimit);
+    dbOffset = (totalPages - 1) * dbLimit;
+    loadDbTableData();
+  }
+};
+
+$("dbrows").onclick = e => {
+  const th = e.target.closest("th.dbsortth");
+  if (th) {
+    const col = th.dataset.col;
+    if (dbSort.toLowerCase() === col.toLowerCase()) {
+      dbDir = dbDir === "desc" ? "asc" : "desc";
+    } else {
+      dbSort = col;
+      dbDir = "desc";
+    }
+    loadDbTableData();
+    return;
+  }
+  
+  const tr = e.target.closest("tr.dbrowitem");
+  if (tr && dbLastData && dbLastData.rows) {
+    const idx = +tr.dataset.rowidx;
+    const rowObj = dbLastData.rows[idx];
+    if (!rowObj) return;
+    
+    const res = dbLastData.resolved || {};
+    const descs = dbLastData.descriptions || {};
+    const cols = Object.keys(rowObj);
+    
+    $("dbrowmodaltit").textContent = `Row Inspector — ${dbCurrentTable} (Row #${dbOffset + idx + 1})`;
+    $("dbrowmodaltable").innerHTML = "<tr><th>Column</th><th>C++ Header Description</th><th>Raw Value</th><th>Resolved String (SASTR/SASTRUSER)</th></tr>" +
+      cols.map(c => {
+        const raw = rowObj[c] == null ? '<span class="muted">null</span>' : esc(String(rowObj[c]));
+        const resolvedStr = (res[c] && rowObj[c] != null && res[c][rowObj[c]] !== undefined) ? esc(String(res[c][rowObj[c]])) : '<span class="muted">—</span>';
+        let treeBtn = "";
+        if ((c.toUpperCase() === "PROCESS_ID" || c.toUpperCase() === "PARENTPID") && rowObj[c] && !isNaN(rowObj[c]) && +rowObj[c] > 0) {
+          treeBtn = ` <button class="act dbtreelink" data-pid="${rowObj[c]}" style="padding:1px 6px; font-size:0.8em; margin-left:6px;">🌳 Inspect Process Tree [PID ${rowObj[c]}]</button>`;
+        }
+        return `<tr><td style="font-weight:bold; color:#00ff66;">${esc(c)}</td><td class="muted">${esc(descs[c] || "—")}</td><td><code>${raw}</code></td><td><b>${resolvedStr}</b>${treeBtn}</td></tr>`;
+      }).join("");
+    $("dbrowmodal").style.display = "";
+  }
+};
+
+$("dbschematoggle").onclick = () => {
+  const v = $("dbschemaview");
+  if (v.style.display === "none") {
+    v.style.display = "";
+    $("dbschematoggle").textContent = "hide schema & descriptions";
+  } else {
+    v.style.display = "none";
+    $("dbschematoggle").textContent = "view schema & descriptions";
+  }
+};
+
+$("dbwraptoggle").onclick = () => {
+  dbWrapLong = !dbWrapLong;
+  $("dbwraptoggle").textContent = `wrap long cells: ${dbWrapLong ? "on" : "off"}`;
+  document.querySelectorAll("#dbrows td").forEach(td => {
+    if (dbWrapLong) {
+      td.style.whiteSpace = "pre-wrap";
+      td.style.wordBreak = "break-all";
+      td.style.maxWidth = "none";
+    } else {
+      td.style.whiteSpace = "nowrap";
+      td.style.overflow = "hidden";
+      td.style.textOverflow = "ellipsis";
+      td.style.maxWidth = "260px";
+    }
+  });
+};
+
+$("dbrowmodalclose").onclick = () => { $("dbrowmodal").style.display = "none"; };
+
+
 
 // --- string search ("has this endpoint ever seen X?") ---------------------------
 async function dbFindStrings() {
@@ -903,6 +1160,135 @@ async function dbFindStrings() {
 }
 $("dbfindbtn").onclick = dbFindStrings;
 $("dbfindq").addEventListener("keydown", e => { if (e.key === "Enter") dbFindStrings(); });
+
+// --- process tree & ancestry hierarchy explorer ---------------------------------
+async function inspectProcessTree(target) {
+  const clean = String(target || "").trim();
+  if (!clean) {
+    $("dbtreeinfo").textContent = "please enter a PID or application name";
+    return;
+  }
+  $("dbtreeview").style.display = "";
+  $("dbtreeinfo").textContent = "querying process tree & ancestry hierarchy for '" + clean + "'...";
+  $("dbtreeview").innerHTML = "<div class='muted'>Fetching process ancestry and tree metrics from agent DB...</div>";
+  try {
+    const r = await fetch("/api/db/processtree?q=" + encodeURIComponent(clean));
+    const data = await r.json();
+    if (data.error) {
+      $("dbtreeinfo").textContent = data.error;
+      $("dbtreeview").innerHTML = `<div style="color:#ff3333;">Error: ${esc(data.error)}</div>`;
+      return;
+    }
+    const trees = data.trees || [];
+    if (!trees.length) {
+      $("dbtreeinfo").textContent = `no process tree found matching '${clean}'`;
+      $("dbtreeview").innerHTML = `<div class='muted'>No process records matching '${esc(clean)}' found in SAAPP / SAPROCESSTREE tables.</div>`;
+      return;
+    }
+    $("dbtreeinfo").textContent = `${trees.length} matching process tree${trees.length === 1 ? "" : "s"} found for '${clean}'`;
+
+    let html = trees.map((t, idx) => {
+      const tgt = t.target || {};
+      const anc = t.ancestry || [];
+      const tm = t.tree_metrics || null;
+      const children = t.children || [];
+
+      const tPid = tgt.PROCESS_ID || 0;
+      const tApp = tgt.APP_NAME || "Unknown";
+      const tStart = tgt.START_TIME || "";
+      const tEnd = tgt.END_TIME || "";
+      const tPath = tgt.PATH_NAME || "";
+      const tCmd = tgt.CMDLINE || "";
+
+      let ancHtml = "";
+      if (anc.length) {
+        let indent = 0;
+        anc.forEach(a => {
+          const aPid = a.PROCESS_ID || 0;
+          const aApp = a.APP_NAME || "Unknown";
+          const aStart = a.START_TIME || "";
+          ancHtml += `<div style="margin-left:${indent * 18}px; padding:2px 0; font-family:monospace; color:#88cc88;">` +
+            `└─ <b style="color:#00ff66;">[PID ${aPid}] ${esc(aApp)}</b> <span class="muted">(Started: ${esc(aStart)})</span>` +
+            ` <a href="#" class="dbtreelink" data-pid="${aPid}" style="color:#00ff66; font-size:0.8em; text-decoration:underline;">[focus]</a>` +
+            `</div>`;
+          indent++;
+        });
+        ancHtml += `<div style="margin-left:${indent * 18}px; padding:4px 8px; background:rgba(0,255,102,0.15); border:1px solid #00ff66; border-radius:3px; margin-top:4px; font-family:monospace;">` +
+          `⭐ <b>Target: [PID ${tPid}] ${esc(tApp)}</b>` +
+          `${tStart ? ` <span class="muted">| Started: ${esc(tStart)} ${tEnd ? `(Ended: ${esc(tEnd)})` : '(Running)'}</span>` : ''}` +
+          `${tPath ? `<br><span class="muted">Path:</span> ${esc(tPath)}` : ''}` +
+          `${tCmd ? `<br><span class="muted">Cmdline:</span> <code>${esc(tCmd)}</code>` : ''}` +
+          `</div>`;
+      } else {
+        ancHtml = `<div style="padding:4px 8px; background:rgba(0,255,102,0.15); border:1px solid #00ff66; border-radius:3px; font-family:monospace;">` +
+          `⭐ <b>Top-Level / Root Target: [PID ${tPid}] ${esc(tApp)}</b>` +
+          `${tStart ? ` <span class="muted">| Started: ${esc(tStart)} ${tEnd ? `(Ended: ${esc(tEnd)})` : '(Running)'}</span>` : ''}` +
+          `${tPath ? `<br><span class="muted">Path:</span> ${esc(tPath)}` : ''}` +
+          `${tCmd ? `<br><span class="muted">Cmdline:</span> <code>${esc(tCmd)}</code>` : ''}` +
+          `</div>`;
+      }
+
+      let metricsHtml = "";
+      if (tm) {
+        const totSec = ((tm.TOTAL_TIME || 0) / 1000).toFixed(2);
+        const memMb = (tm.MEM_USED || 0).toFixed(2);
+        const kernPct = ((tm.KERN_USED || 0) / 10).toFixed(1);
+        const userPct = ((tm.USER_USED || 0) / 10).toFixed(1);
+        metricsHtml = `<div style="margin-top:8px; padding:6px 10px; background:#0f1a0f; border-left:3px solid #00ff66; font-size:0.9em;">` +
+          `<b style="color:#00ff66;">SAPROCESSTREE Metrics:</b> ` +
+          `Run Time: <b>${totSec}s</b> | Memory: <b>${memMb} MB</b> | CPU (Kern/User): <b>${kernPct}% / ${userPct}%</b>` +
+          `</div>`;
+      }
+
+      let childHtml = "";
+      if (children.length) {
+        childHtml = `<div style="margin-top:8px; font-size:0.95em;"><b style="color:#00ff66;">Child Processes (${children.length} spawned):</b><div style="margin-top:4px; max-height:160px; overflow-y:auto; padding-left:12px; border-left:1px dashed #336633;">` +
+          children.map(c => {
+            const cPid = c.PROCESS_ID || 0;
+            const cApp = c.APP_NAME || "Unknown";
+            const cPath = c.PATH_NAME || "";
+            return `<div style="padding:2px 0; font-family:monospace;">├── [Child PID ${cPid}] <b style="color:#aaddaa;">${esc(cApp)}</b> ${cPath ? `<span class="muted">(${esc(cPath)})</span>` : ''} <a href="#" class="dbtreelink" data-pid="${cPid}" style="color:#00ff66; font-size:0.8em; text-decoration:underline;">[focus]</a></div>`;
+          }).join("") +
+          `</div></div>`;
+      } else if (tm && tm.CHILD_PIDS && tm.CHILD_PIDS.trim()) {
+        childHtml = `<div style="margin-top:8px; font-size:0.9em;"><b class="muted">Child PIDs (SAPROCESSTREE):</b> <code>${esc(tm.CHILD_PIDS)}</code></div>`;
+      }
+
+      return `<div style="margin-bottom:1.25rem; padding-bottom:1rem; border-bottom:${idx < trees.length - 1 ? '1px dashed #2a4a2a' : 'none'};">` +
+        `<div style="font-size:1.05em; font-weight:bold; color:#00ff66; margin-bottom:6px;">#${idx + 1}. Process Hierarchy Tree for [PID ${tPid}] ${esc(tApp)}</div>` +
+        ancHtml + metricsHtml + childHtml +
+        `</div>`;
+    }).join("");
+
+    $("dbtreeview").innerHTML = html;
+  } catch (e) {
+    $("dbtreeinfo").textContent = "request failed: " + e;
+    $("dbtreeview").innerHTML = `<div style="color:#ff3333;">Request failed: ${esc(String(e))}</div>`;
+  }
+}
+
+$("dbtreebtn").onclick = () => inspectProcessTree($("dbtreeq").value);
+$("dbtreeclear").onclick = () => { $("dbtreeq").value = ""; $("dbtreeview").style.display = "none"; $("dbtreeinfo").textContent = ""; };
+$("dbtreeq").addEventListener("keydown", e => { if (e.key === "Enter") inspectProcessTree($("dbtreeq").value); });
+
+document.addEventListener("click", e => {
+  const link = e.target.closest(".dbtreelink");
+  if (link) {
+    e.preventDefault();
+    e.stopPropagation();
+    const pid = link.dataset.pid;
+    if (pid) {
+      if ($("dbrowmodal") && $("dbrowmodal").style.display !== "none") {
+        $("dbrowmodal").style.display = "none";
+      }
+      $("dbtreeq").value = pid;
+      inspectProcessTree(pid);
+      if ($("dbtreeview")) {
+        $("dbtreeview").scrollIntoView({ behavior: "smooth" });
+      }
+    }
+  }
+});
 
 // --- quick trace level ----------------------------------------------------------
 $("traceapply").onclick = async () => {

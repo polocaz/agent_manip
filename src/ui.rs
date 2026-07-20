@@ -429,7 +429,7 @@ pub async fn show_startup_animation(terminal: &mut Terminal<CrosstermBackend<std
             0 => 0, // Header - instant
             1 => 0, // Loading message - instant
             2 => 0, // ASCII art - instant
-            3 => if is_root { 500 } else { 0 }, // Final status - brief pause for success, instant for error
+            3 if is_root => 500, // Final status - brief pause for success, instant for error
             _ => 0,
         };
 

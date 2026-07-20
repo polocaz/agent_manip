@@ -72,14 +72,17 @@ pub enum CliCommand {
         /// SQL to run, e.g. `lsman db "SELECT count(*) FROM SYSTEM"`
         sql: Option<String>,
         /// Show a table's newest rows with string-IDs resolved via SASTR/SASTRUSER
-        #[arg(long, conflicts_with_all = ["sql", "find"])]
+        #[arg(long, conflicts_with_all = ["sql", "find", "processtree"])]
         table: Option<String>,
         /// Max rows for --table
         #[arg(long, default_value_t = 25)]
         limit: usize,
         /// Search SASTR/SASTRUSER for a substring ("has this box ever seen X?")
-        #[arg(long, conflicts_with = "sql")]
+        #[arg(long, conflicts_with_all = ["sql", "processtree"])]
         find: Option<String>,
+        /// Trace process ancestry hierarchy and child tree for a PID or application name pattern
+        #[arg(long, visible_alias = "tree", conflicts_with_all = ["sql"])]
+        processtree: Option<String>,
     },
     /// List recent agent crash reports (macOS DiagnosticReports)
     Crashes {
@@ -143,7 +146,7 @@ pub async fn run(command: CliCommand) -> Result<()> {
         CliCommand::Errors { log, lines, since, raw } => cmd_errors(log, lines, since, raw),
         CliCommand::Config { path } => cmd_config(path),
         CliCommand::Trace { level, restart } => cmd_trace(level, restart).await,
-        CliCommand::Db { sql, table, limit, find } => cmd_db(sql, table, limit, find),
+        CliCommand::Db { sql, table, limit, find, processtree } => cmd_db(sql, table, limit, find, processtree),
         CliCommand::Crashes { count, show } => cmd_crashes(count, show),
         CliCommand::Net => cmd_net().await,
         CliCommand::Report { since, output } => cmd_report(since, output).await,
@@ -866,12 +869,16 @@ fn cmd_db(
     table: Option<String>,
     limit: usize,
     find: Option<String>,
+    processtree: Option<String>,
 ) -> Result<()> {
     let db = paths::database_path();
     if !db.exists() {
         bail!("database not found at {}", db.display());
     }
 
+    if let Some(target) = processtree {
+        return cmd_db_processtree(&target);
+    }
     if let Some(pattern) = find {
         return cmd_db_find(&pattern);
     }
@@ -904,7 +911,82 @@ fn cmd_db(
     Ok(())
 }
 
-/// `lsman db --find X`: substring search over the SASTR/SASTRUSER string
+/// `lsman db --processtree TARGET`: full process tree ancestry and children Report.
+fn cmd_db_processtree(target: &str) -> Result<()> {
+    let res = crate::db::query_process_tree(target)?;
+    let trees = res.get("trees").and_then(|t| t.as_array()).cloned().unwrap_or_default();
+    if trees.is_empty() {
+        println!("No process tree found matching '{}'.", target);
+        return Ok(());
+    }
+
+    println!("Process Tree & Ancestry Report for query '{}' ({} matching tree{}):\n", target, trees.len(), if trees.len() == 1 { "" } else { "s" });
+    for (i, tree) in trees.iter().enumerate() {
+        if i > 0 { println!("--------------------------------------------------"); }
+        let target_row = tree.get("target").and_then(|v| v.as_object());
+        let ancestry = tree.get("ancestry").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+        let tree_metrics = tree.get("tree_metrics").and_then(|v| v.as_object());
+        let children = tree.get("children").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+
+        let Some(t_obj) = target_row else { continue };
+        let pid = t_obj.get("PROCESS_ID").and_then(|v| v.as_i64()).unwrap_or(0);
+        let app = t_obj.get("APP_NAME").and_then(|v| v.as_str()).unwrap_or("Unknown");
+        let start = t_obj.get("START_TIME").and_then(|v| v.as_str()).unwrap_or("");
+        let end = t_obj.get("END_TIME").and_then(|v| v.as_str()).unwrap_or("");
+        let path = t_obj.get("PATH_NAME").and_then(|v| v.as_str()).unwrap_or("");
+        let cmd = t_obj.get("CMDLINE").and_then(|v| v.as_str()).unwrap_or("");
+
+        println!("Target Process [PID {}]: {}", pid, app);
+        if !start.is_empty() { println!("  Started:   {} (Ended: {})", start, if end.is_empty() { "running" } else { end }); }
+        if !path.is_empty() { println!("  Path:      {}", path); }
+        if !cmd.is_empty() { println!("  Cmdline:   {}", cmd); }
+
+        if !ancestry.is_empty() {
+            println!("\n  Process Ancestry Hierarchy (parent to root):");
+            let mut indent = "    ".to_string();
+            for anc in &ancestry {
+                let apid = anc.get("PROCESS_ID").and_then(|v| v.as_i64()).unwrap_or(0);
+                let aapp = anc.get("APP_NAME").and_then(|v| v.as_str()).unwrap_or("Unknown");
+                let astart = anc.get("START_TIME").and_then(|v| v.as_str()).unwrap_or("");
+                println!("{}└─ [PID {}] {} (Started: {})", indent, apid, aapp, astart);
+                indent.push_str("  ");
+            }
+            println!("{}└─ [PID {}] {}  <── Target Process", indent, pid, app);
+        } else {
+            println!("\n  Process Ancestry Hierarchy: (Root / Top-level process)");
+        }
+
+        if let Some(tm) = tree_metrics {
+            let tot_ms = tm.get("TOTAL_TIME").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let mem = tm.get("MEM_USED").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let kern = tm.get("KERN_USED").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let user = tm.get("USER_USED").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            println!("\n  SAPROCESSTREE Tree Resource Metrics:");
+            println!("    Total Tree Run Time: {:.2}s | Memory Used: {:.2} MB", tot_ms / 1000.0, mem);
+            println!("    CPU Usage (Kern / User): {:.1}% / {:.1}% of single core", kern / 10.0, user / 10.0);
+        }
+
+        if !children.is_empty() {
+            println!("\n  Child Processes ({} spawned):", children.len());
+            for c in &children {
+                let cpid = c.get("PROCESS_ID").and_then(|v| v.as_i64()).unwrap_or(0);
+                let capp = c.get("APP_NAME").and_then(|v| v.as_str()).unwrap_or("Unknown");
+                let cpath = c.get("PATH_NAME").and_then(|v| v.as_str()).unwrap_or("");
+                println!("    ├── [Child PID {}] {} {}", cpid, capp, if !cpath.is_empty() { format!("({})", cpath) } else { "".to_string() });
+            }
+        } else if let Some(tm) = tree_metrics {
+            if let Some(cp_str) = tm.get("CHILD_PIDS").and_then(|v| v.as_str()) {
+                if !cp_str.trim().is_empty() {
+                    println!("\n  Child PIDs in SAPROCESSTREE: {}", cp_str);
+                }
+            }
+        }
+        println!();
+    }
+    Ok(())
+}
+
+/// Fast `WHERE STRVALUE LIKE '%...%'` scan across SASTR and SASTRUSER string
 /// tables. Inventory tables reference strings by ID, so this is the fastest
 /// "has this endpoint ever seen X in any form" check — zero matches means no
 /// table can reference it.
@@ -943,13 +1025,16 @@ fn cmd_db_table(name: &str, limit: usize) -> Result<()> {
         return Ok(());
     }
     let resolved = crate::db::resolve_string_ids(&rows);
+    let descriptions = crate::db::table_descriptions(name);
 
-    // Column set from the first row (serde_json objects sort keys, so the
-    // order is alphabetical, not schema order).
-    let cols: Vec<String> = rows[0]
-        .as_object()
-        .map(|o| o.keys().cloned().collect())
-        .unwrap_or_default();
+    // Prefer actual DB schema order, falling back to alphabetical from first row object.
+    let cols: Vec<String> = match crate::db::table_column_names(name) {
+        Ok(c) if !c.is_empty() => c,
+        _ => rows[0]
+            .as_object()
+            .map(|o| o.keys().cloned().collect())
+            .unwrap_or_default(),
+    };
     let mut grid: Vec<Vec<String>> = Vec::with_capacity(rows.len() + 1);
     grid.push(
         cols.iter()
@@ -990,6 +1075,14 @@ fn cmd_db_table(name: &str, limit: usize) -> Result<()> {
     println!("\n{} rows (newest first, max {})", rows.len(), limit);
     if !resolved.is_empty() {
         println!("* string-IDs resolved via SASTR/SASTRUSER; unresolved IDs shown raw");
+    }
+    if !descriptions.is_empty() {
+        println!("\nColumn Descriptions (from C++ headers):");
+        for (col, desc) in &descriptions {
+            if cols.contains(col) {
+                println!("  {:<26} {}", col, desc);
+            }
+        }
     }
     Ok(())
 }

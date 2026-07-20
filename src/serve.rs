@@ -147,6 +147,10 @@ fn handle_request(
             Ok(resp) => resp,
             Err(e) => error_response(400, &e.to_string()),
         },
+        "/api/db/processtree" => match api_db_processtree(query) {
+            Ok(resp) => resp,
+            Err(e) => error_response(400, &e.to_string()),
+        },
         "/api/daemon/start" | "/api/daemon/stop" | "/api/daemon/restart" => {
             if *request.method() != tiny_http::Method::Post {
                 error_response(405, "POST required")
@@ -438,15 +442,19 @@ fn api_db_tables() -> Result<HttpResponse> {
 
 fn api_db_table(query: &str) -> Result<HttpResponse> {
     let name = query_param(query, "name").ok_or_else(|| anyhow!("missing ?name="))?;
-    // db::table_rows validates the name against the DB's actual table list —
-    // never raw identifiers from the client.
-    let rows = crate::db::table_rows(&name, 50)?;
-    // SysTrack tables store names as integer string-IDs; ship the id→string
-    // map alongside so the dashboard can render human-readable rows.
-    let resolved = crate::db::resolve_string_ids(&rows);
-    Ok(json_response(
-        &serde_json::json!({ "name": name, "rows": rows, "resolved": resolved }),
-    ))
+    let limit = query_param(query, "limit")
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(100)
+        .min(5000);
+    let offset = query_param(query, "offset")
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(0);
+    let sort = query_param(query, "sort").unwrap_or_else(|| "rowid".to_string());
+    let dir = query_param(query, "dir").unwrap_or_else(|| "desc".to_string());
+    let filter = query_param(query, "q").unwrap_or_default();
+
+    let result = crate::db::query_table(&name, limit, offset, &sort, &dir, &filter)?;
+    Ok(json_response(&result))
 }
 
 /// Substring search over SASTR/SASTRUSER — "has this endpoint ever seen X".
@@ -461,6 +469,16 @@ fn api_db_strings(query: &str) -> Result<HttpResponse> {
     Ok(json_response(
         &serde_json::json!({ "q": q.trim(), "rows": rows, "limit": 200 }),
     ))
+}
+
+/// Query full process ancestry tree and children for a PID or application name pattern.
+fn api_db_processtree(query: &str) -> Result<HttpResponse> {
+    let q = query_param(query, "q").or_else(|| query_param(query, "pid")).unwrap_or_default();
+    if q.trim().is_empty() {
+        bail!("need ?q= or ?pid= specifying target PID or application name");
+    }
+    let res = crate::db::query_process_tree(q.trim())?;
+    Ok(json_response(&res))
 }
 
 static COLLECT_SEQ: AtomicU64 = AtomicU64::new(0);
