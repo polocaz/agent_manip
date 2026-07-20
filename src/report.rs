@@ -79,10 +79,20 @@ pub struct UplinkConn {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct SocketInfo {
+    pub protocol: String,
+    pub local: String,
+    pub remote: Option<String>,
+    pub state: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct UplinkInfo {
     /// False when lsof couldn't see the daemon's sockets (needs sudo).
     pub available: bool,
     pub established: Vec<UplinkConn>,
+    /// Every open socket, LISTEN/UDP included (established repeated here).
+    pub sockets: Vec<SocketInfo>,
     pub total_sockets: usize,
     pub error: Option<String>,
 }
@@ -123,6 +133,7 @@ pub struct DiagSnapshot {
     pub base_dir: FileInfo,
     pub config: ConfigInfo,
     pub database: FileInfo,
+    pub profile: FileInfo,
     pub uplink: UplinkInfo,
     pub logs: Vec<LogInfo>,
     pub crashes: Vec<CrashInfo>,
@@ -186,12 +197,22 @@ pub async fn gather(mgr: &mut DaemonManager) -> DiagSnapshot {
                         remote: c.remote.clone().unwrap_or_default(),
                     })
                     .collect(),
+                sockets: conns
+                    .iter()
+                    .map(|c| SocketInfo {
+                        protocol: c.protocol.clone(),
+                        local: c.local.clone(),
+                        remote: c.remote.clone(),
+                        state: c.state.clone(),
+                    })
+                    .collect(),
                 total_sockets: conns.len(),
                 error: None,
             },
             Err(e) => UplinkInfo {
                 available: false,
                 established: Vec::new(),
+                sockets: Vec::new(),
                 total_sockets: 0,
                 error: Some(e.to_string()),
             },
@@ -199,6 +220,7 @@ pub async fn gather(mgr: &mut DaemonManager) -> DiagSnapshot {
         None => UplinkInfo {
             available: false,
             established: Vec::new(),
+            sockets: Vec::new(),
             total_sockets: 0,
             error: Some("daemon not running".to_string()),
         },
@@ -235,6 +257,7 @@ pub async fn gather(mgr: &mut DaemonManager) -> DiagSnapshot {
         base_dir: FileInfo::for_path(&paths::base_dir()),
         config,
         database: FileInfo::for_path(&paths::database_path()),
+        profile: FileInfo::for_path(&paths::profile_path()),
         uplink,
         logs,
         crashes,
@@ -276,7 +299,10 @@ pub fn scan_errors_in(
 ) -> ErrorScan {
     let now = Utc::now();
     let cutoff = since.map(|d| now.naive_utc() - d);
-    let mut grouper = ErrorGrouper::new();
+    let mut grouper = match since {
+        Some(d) => ErrorGrouper::with_window(now, d),
+        None => ErrorGrouper::new(),
+    };
     let mut unreadable = Vec::new();
 
     for log in logs {
@@ -377,6 +403,7 @@ pub fn to_markdown(snap: &DiagSnapshot) -> String {
     };
     let _ = writeln!(w, "- config: {} — {}", file_line(&snap.config.file), trace);
     let _ = writeln!(w, "- database: {}", file_line(&snap.database));
+    let _ = writeln!(w, "- profile: {}", file_line(&snap.profile));
 
     let _ = writeln!(w, "\n## Uplink to master\n");
     if !snap.uplink.available {

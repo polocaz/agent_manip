@@ -71,6 +71,15 @@ pub enum CliCommand {
     Db {
         /// SQL to run, e.g. `lsman db "SELECT count(*) FROM SYSTEM"`
         sql: Option<String>,
+        /// Show a table's newest rows with string-IDs resolved via SASTR/SASTRUSER
+        #[arg(long, conflicts_with_all = ["sql", "find"])]
+        table: Option<String>,
+        /// Max rows for --table
+        #[arg(long, default_value_t = 25)]
+        limit: usize,
+        /// Search SASTR/SASTRUSER for a substring ("has this box ever seen X?")
+        #[arg(long, conflicts_with = "sql")]
+        find: Option<String>,
     },
     /// List recent agent crash reports (macOS DiagnosticReports)
     Crashes {
@@ -104,7 +113,7 @@ pub enum CliCommand {
         #[arg(long)]
         since: Option<String>,
     },
-    /// Serve a read-only web dashboard (status, error triage, log tails)
+    /// Serve a web dashboard (status, errors, logs, daemon control, downloads, cfg editor)
     Serve {
         #[arg(short, long, default_value_t = 7171)]
         port: u16,
@@ -134,7 +143,7 @@ pub async fn run(command: CliCommand) -> Result<()> {
         CliCommand::Errors { log, lines, since, raw } => cmd_errors(log, lines, since, raw),
         CliCommand::Config { path } => cmd_config(path),
         CliCommand::Trace { level, restart } => cmd_trace(level, restart).await,
-        CliCommand::Db { sql } => cmd_db(sql),
+        CliCommand::Db { sql, table, limit, find } => cmd_db(sql, table, limit, find),
         CliCommand::Crashes { count, show } => cmd_crashes(count, show),
         CliCommand::Net => cmd_net().await,
         CliCommand::Report { since, output } => cmd_report(since, output).await,
@@ -762,7 +771,7 @@ pub(crate) fn read_log_level(cfg: &str) -> Option<i64> {
 
 /// Return cfg content with `LogLevel2=<level>` set in the `[Debug]` section,
 /// creating the key or section as needed. Preserves everything else.
-fn set_log_level(cfg: &str, level: i64) -> String {
+pub(crate) fn set_log_level(cfg: &str, level: i64) -> String {
     let mut lines: Vec<String> = cfg.lines().map(|l| l.to_string()).collect();
     let mut in_debug = false;
     let mut debug_header_idx: Option<usize> = None;
@@ -852,10 +861,22 @@ async fn cmd_trace(level: Option<String>, restart: bool) -> Result<()> {
 // ---------------------------------------------------------------------------
 // db
 
-fn cmd_db(sql: Option<String>) -> Result<()> {
+fn cmd_db(
+    sql: Option<String>,
+    table: Option<String>,
+    limit: usize,
+    find: Option<String>,
+) -> Result<()> {
     let db = paths::database_path();
     if !db.exists() {
         bail!("database not found at {}", db.display());
+    }
+
+    if let Some(pattern) = find {
+        return cmd_db_find(&pattern);
+    }
+    if let Some(name) = table {
+        return cmd_db_table(&name, limit);
     }
 
     let sql = sql.unwrap_or_else(|| {
@@ -881,6 +902,125 @@ fn cmd_db(sql: Option<String>) -> Result<()> {
         bail!("sqlite3 exited with {}{}", status, hint);
     }
     Ok(())
+}
+
+/// `lsman db --find X`: substring search over the SASTR/SASTRUSER string
+/// tables. Inventory tables reference strings by ID, so this is the fastest
+/// "has this endpoint ever seen X in any form" check — zero matches means no
+/// table can reference it.
+fn cmd_db_find(pattern: &str) -> Result<()> {
+    const CAP: usize = 200;
+    let rows = crate::db::search_strings(pattern, CAP)?;
+    if rows.is_empty() {
+        println!(
+            "no SASTR/SASTRUSER string matches '{}' — conclusive: nothing on this endpoint references it in any form",
+            pattern
+        );
+        return Ok(());
+    }
+    println!("{:<9} {:>10}  value", "scope", "string-id");
+    for r in &rows {
+        println!(
+            "{:<9} {:>10}  {}",
+            r.get("scope").and_then(|v| v.as_str()).unwrap_or("?"),
+            r.get("STRINGID").and_then(|v| v.as_i64()).unwrap_or(-1),
+            r.get("STRVALUE").and_then(|v| v.as_str()).unwrap_or("")
+        );
+    }
+    if rows.len() >= CAP {
+        println!("(capped at {} matches — narrow the pattern)", CAP);
+    }
+    Ok(())
+}
+
+/// `lsman db --table NAME`: newest rows with integer string-IDs resolved to
+/// their SASTR/SASTRUSER values, so inventory tables are readable without
+/// hand-writing joins.
+fn cmd_db_table(name: &str, limit: usize) -> Result<()> {
+    let rows = crate::db::table_rows(name, limit)?;
+    if rows.is_empty() {
+        println!("{}: empty table", name);
+        return Ok(());
+    }
+    let resolved = crate::db::resolve_string_ids(&rows);
+
+    // Column set from the first row (serde_json objects sort keys, so the
+    // order is alphabetical, not schema order).
+    let cols: Vec<String> = rows[0]
+        .as_object()
+        .map(|o| o.keys().cloned().collect())
+        .unwrap_or_default();
+    let mut grid: Vec<Vec<String>> = Vec::with_capacity(rows.len() + 1);
+    grid.push(
+        cols.iter()
+            .map(|c| {
+                if resolved.contains_key(c) {
+                    format!("{}*", c)
+                } else {
+                    c.clone()
+                }
+            })
+            .collect(),
+    );
+    for row in &rows {
+        grid.push(
+            cols.iter()
+                .map(|c| {
+                    render_db_cell(row.as_object().and_then(|o| o.get(c)), c, &resolved)
+                })
+                .collect(),
+        );
+    }
+
+    let mut widths = vec![0usize; cols.len()];
+    for row in &grid {
+        for (i, cell) in row.iter().enumerate() {
+            widths[i] = widths[i].max(cell.chars().count());
+        }
+    }
+    for row in &grid {
+        let line = row
+            .iter()
+            .enumerate()
+            .map(|(i, cell)| format!("{:<width$}", cell, width = widths[i]))
+            .collect::<Vec<_>>()
+            .join("  ");
+        println!("{}", line.trim_end());
+    }
+    println!("\n{} rows (newest first, max {})", rows.len(), limit);
+    if !resolved.is_empty() {
+        println!("* string-IDs resolved via SASTR/SASTRUSER; unresolved IDs shown raw");
+    }
+    Ok(())
+}
+
+fn render_db_cell(
+    value: Option<&serde_json::Value>,
+    col: &str,
+    resolved: &crate::db::ResolvedStrings,
+) -> String {
+    let Some(value) = value else { return String::new() };
+    if let (Some(map), Some(id)) = (resolved.get(col), value.as_i64()) {
+        if let Some(s) = map.get(&id) {
+            return clip_cell(s);
+        }
+    }
+    match value {
+        serde_json::Value::Null => String::new(),
+        serde_json::Value::String(s) => clip_cell(s),
+        other => other.to_string(),
+    }
+}
+
+/// Keep table cells terminal-friendly; resolved paths/cmdlines can be long.
+fn clip_cell(s: &str) -> String {
+    const MAX: usize = 48;
+    if s.chars().count() <= MAX {
+        return s.to_string();
+    }
+    let mut t: String = s.chars().take(MAX - 1).collect();
+    t.push('…');
+    t
 }
 
 // ---------------------------------------------------------------------------

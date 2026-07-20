@@ -134,6 +134,9 @@ pub fn split_site(site: &str) -> Option<(&str, u32)> {
     }
 }
 
+/// Number of trend buckets a windowed scan spreads each group's hits over.
+pub const TREND_BUCKETS: usize = 40;
+
 /// Error lines aggregated by the source site that emitted them.
 #[derive(Debug, Clone, Serialize)]
 pub struct ErrorGroup {
@@ -147,6 +150,9 @@ pub struct ErrorGroup {
     pub last_seen: Option<String>,
     /// Most recent matching line, whitespace-trimmed.
     pub sample: String,
+    /// Hits per time bucket across the scan window ([`TREND_BUCKETS`] cells,
+    /// oldest first). Empty when the scan had no window (whole logs).
+    pub buckets: Vec<u32>,
 }
 
 /// Streaming accumulator: feed every error line, get groups sorted by
@@ -154,11 +160,22 @@ pub struct ErrorGroup {
 #[derive(Default)]
 pub struct ErrorGrouper {
     groups: std::collections::HashMap<(String, String), ErrorGroup>,
+    /// `(window start, window length in seconds)` for trend bucketing.
+    window: Option<(DateTime<Utc>, i64)>,
 }
 
 impl ErrorGrouper {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// A grouper that also builds per-group trend buckets over
+    /// `[now - duration, now]`.
+    pub fn with_window(now: DateTime<Utc>, duration: chrono::Duration) -> Self {
+        Self {
+            groups: std::collections::HashMap::new(),
+            window: Some((now - duration, duration.num_seconds().max(1))),
+        }
     }
 
     pub fn add(&mut self, log_name: &str, line: &str, now: DateTime<Utc>) {
@@ -167,6 +184,14 @@ impl ErrorGrouper {
             .site
             .unwrap_or_else(|| "(unrecognized format)".to_string());
         let ts = parsed.timestamp.map(|t| t.format("%m-%d %H:%M:%S").to_string());
+        let bucket = self.window.and_then(|(start, total)| {
+            let off = (parsed.timestamp? - start.naive_utc()).num_seconds();
+            (0..total).contains(&off).then(|| {
+                ((off as usize).saturating_mul(TREND_BUCKETS) / total as usize)
+                    .min(TREND_BUCKETS - 1)
+            })
+        });
+        let windowed = self.window.is_some();
 
         let group = self
             .groups
@@ -178,6 +203,7 @@ impl ErrorGrouper {
                 first_seen: ts.clone(),
                 last_seen: None,
                 sample: String::new(),
+                buckets: if windowed { vec![0; TREND_BUCKETS] } else { Vec::new() },
             });
         group.count += 1;
         if group.first_seen.is_none() {
@@ -185,6 +211,9 @@ impl ErrorGrouper {
         }
         if ts.is_some() {
             group.last_seen = ts;
+        }
+        if let Some(b) = bucket {
+            group.buckets[b] += 1;
         }
         group.sample = line.trim().to_string();
     }
@@ -309,6 +338,27 @@ mod tests {
         assert_eq!(groups[1].first_seen.as_deref(), Some("07-01 08:00:00"));
         assert_eq!(groups[1].last_seen.as_deref(), Some("07-02 08:00:00"));
         assert_eq!(groups[1].sample, "07-02 08:00:00 a.cpp(1) -E second failure");
+    }
+
+    #[test]
+    fn windowed_grouping_fills_trend_buckets() {
+        // now = 07-05 12:00; 24h window starts 07-04 12:00
+        let mut g = ErrorGrouper::with_window(now(), chrono::Duration::hours(24));
+        g.add("agent", "07-04 12:30:00 a.cpp(1) -E early", now()); // ~2% in
+        g.add("agent", "07-05 11:30:00 a.cpp(1) -E late", now()); // ~98% in
+        g.add("agent", "07-05 11:31:00 a.cpp(1) -E late again", now());
+        let groups = g.into_sorted();
+        assert_eq!(groups.len(), 1);
+        let b = &groups[0].buckets;
+        assert_eq!(b.len(), TREND_BUCKETS);
+        assert_eq!(b.iter().sum::<u32>(), 3);
+        assert_eq!(b[0], 1, "early hit lands in the first bucket");
+        assert_eq!(b[TREND_BUCKETS - 1], 2, "late hits land in the last bucket");
+
+        // unwindowed groupers keep buckets empty
+        let mut g = ErrorGrouper::new();
+        g.add("agent", "07-04 12:30:00 a.cpp(1) -E x", now());
+        assert!(g.into_sorted()[0].buckets.is_empty());
     }
 
     #[test]

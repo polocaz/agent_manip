@@ -3,84 +3,238 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
 <title>lsman — LSI agent</title>
 <style>
+  /* One hue drives the whole theme: presets/custom picker set --h/--s, and
+     every surface, border and text tone derives from them. */
   :root {
-    --green: #1aff80; --dim: #0e9950; --dark: #063b20;
-    --bg: #050d08; --panel: #081710; --warn: #ffd24d; --err: #ff5c5c;
+    --h: 145; --s: 85%;
+    --accent: hsl(var(--h) var(--s) 60%);
+    --bright: hsl(var(--h) var(--s) 78%);
+    --text:   hsl(var(--h) calc(var(--s) * 0.6) 72%);
+    --dim:    hsl(var(--h) calc(var(--s) * 0.5) 42%);
+    --dark:   hsl(var(--h) calc(var(--s) * 0.45) 16%);
+    --faint:  hsl(var(--h) calc(var(--s) * 0.4) 9%);
+    --bg:     hsl(var(--h) 40% 4%);
+    --panel:  hsl(var(--h) 35% 7%);
+    --warn: #ffd24d; --err: #ff5c5c;
+    --glow: 0 0 10px hsl(var(--h) var(--s) 60% / .35);
   }
   * { box-sizing: border-box; }
   body {
-    margin: 0; background: var(--bg); color: var(--green);
+    margin: 0; min-height: 100vh;
+    background: radial-gradient(ellipse 120% 90% at 50% -20%, var(--panel), var(--bg) 70%);
+    color: var(--text);
     font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-    font-size: 14px; line-height: 1.45;
+    font-size: 14px; line-height: 1.5;
+    transition: background .3s, color .3s;
   }
-  body::after { /* faint CRT scanlines */
-    content: ""; pointer-events: none; position: fixed; inset: 0;
-    background: repeating-linear-gradient(0deg, rgba(0,0,0,.18) 0 1px, transparent 1px 3px);
+  ::selection { background: var(--accent); color: var(--bg); }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: var(--faint); }
+  ::-webkit-scrollbar-thumb { background: var(--dark); border-radius: 5px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--dim); }
+
+  /* CRT effects layer — body.fx only, toggleable from the header */
+  body.fx::after { /* scanlines */
+    content: ""; pointer-events: none; position: fixed; inset: 0; z-index: 9;
+    background: repeating-linear-gradient(0deg, rgba(0,0,0,.16) 0 1px, transparent 1px 3px);
   }
+  body.fx::before { /* vignette */
+    content: ""; pointer-events: none; position: fixed; inset: 0; z-index: 8;
+    background: radial-gradient(ellipse 100% 100% at 50% 40%, transparent 60%, rgba(0,0,0,.4));
+  }
+  body.fx h1, body.fx .card .v, body.fx nav button.active { text-shadow: 0 0 9px; }
+  body.fx .card, body.fx pre { box-shadow: inset 0 0 24px hsl(var(--h) var(--s) 50% / .04); }
+
   header {
-    display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap;
-    padding: 14px 20px 10px; border-bottom: 1px solid var(--dark);
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    padding: 14px 20px 12px; border-bottom: 1px solid var(--dark);
   }
-  header h1 { margin: 0; font-size: 18px; letter-spacing: 2px; text-shadow: 0 0 8px rgba(26,255,128,.5); }
-  header .meta { color: var(--dim); }
-  nav { display: flex; gap: 4px; padding: 8px 20px 0; border-bottom: 1px solid var(--dark); }
+  header h1 {
+    margin: 0; font-size: 18px; letter-spacing: 3px; color: var(--bright); font-weight: 600;
+  }
+  header h1::after { content: "▮"; margin-left: 6px; animation: blink 1.4s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  header .meta { color: var(--dim); font-size: 13px; }
+  .spacer { flex: 1; }
+
+  /* theme picker */
+  .themes { display: flex; align-items: center; gap: 8px; }
+  .swatch {
+    width: 18px; height: 18px; border-radius: 50%; cursor: pointer; padding: 0;
+    background: var(--sw); border: 1px solid rgba(0,0,0,.5);
+  }
+  .swatch:hover { transform: scale(1.15); }
+  .swatch.active { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--bright); }
+  .themes input[type=color] {
+    width: 24px; height: 24px; padding: 0; border: 1px solid var(--dim); border-radius: 50%;
+    background: conic-gradient(red, yellow, lime, cyan, blue, magenta, red); cursor: pointer;
+  }
+  .themes input[type=color]::-webkit-color-swatch-wrapper { padding: 0; }
+  .themes input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; opacity: 0; }
+  .fx-toggle { display: flex; align-items: center; gap: 4px; color: var(--dim); cursor: pointer; font-size: 12px; letter-spacing: 1px; }
+
+  nav { display: flex; gap: 2px; padding: 0 20px; border-bottom: 1px solid var(--dark); }
   nav button {
-    background: none; border: 1px solid var(--dark); border-bottom: none;
-    color: var(--dim); font: inherit; padding: 6px 18px; cursor: pointer;
-    border-radius: 6px 6px 0 0; letter-spacing: 1px;
+    background: none; border: none; border-bottom: 2px solid transparent;
+    color: var(--dim); font: inherit; font-size: 12px; padding: 10px 16px; cursor: pointer;
+    letter-spacing: 2px; text-transform: uppercase;
   }
-  nav button.active { color: var(--green); background: var(--panel); border-color: var(--dim); }
-  main { padding: 16px 20px 40px; max-width: 1200px; }
+  nav button:hover { color: var(--accent); }
+  nav button.active { color: var(--bright); border-bottom-color: var(--accent); }
+
+  main { padding: 18px 20px 48px; max-width: 1200px; }
   section { display: none; }
   section.active { display: block; }
-  .cards { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(185px, 1fr)); gap: 12px; margin-bottom: 20px; }
   .card {
-    background: var(--panel); border: 1px solid var(--dark); border-radius: 6px;
-    padding: 10px 16px; min-width: 170px;
+    background: linear-gradient(180deg, var(--panel), var(--faint));
+    border: 1px solid var(--dark); border-radius: 10px; padding: 12px 16px;
+    transition: border-color .2s;
   }
-  .card .k { color: var(--dim); font-size: 12px; letter-spacing: 1px; text-transform: uppercase; }
-  .card .v { font-size: 17px; margin-top: 2px; }
-  .ok { color: var(--green); } .warn { color: var(--warn); } .err { color: var(--err); }
-  table { border-collapse: collapse; width: 100%; margin: 8px 0 20px; }
-  th, td { text-align: left; padding: 4px 12px 4px 0; border-bottom: 1px solid var(--dark); vertical-align: top; }
-  th { color: var(--dim); font-weight: normal; text-transform: uppercase; font-size: 12px; letter-spacing: 1px; }
-  h2 { font-size: 14px; letter-spacing: 2px; text-transform: uppercase; color: var(--dim); margin: 18px 0 6px; }
+  .card:hover { border-color: var(--dim); }
+  .card .k { color: var(--dim); font-size: 11px; letter-spacing: 2px; text-transform: uppercase; }
+  .card .v { font-size: 18px; margin-top: 4px; color: var(--accent); overflow-wrap: anywhere; }
+  .ok { color: var(--accent); } .warn { color: var(--warn); } .err { color: var(--err); }
+
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 7px; vertical-align: 1px; }
+  .dot.on { background: var(--accent); box-shadow: 0 0 6px var(--accent); animation: pulse 2s ease-in-out infinite; }
+  .dot.off { background: var(--err); box-shadow: 0 0 6px var(--err); }
+  @keyframes pulse { 50% { opacity: .45; } }
+
+  table { border-collapse: collapse; width: 100%; margin: 8px 0 22px; }
+  th, td { text-align: left; padding: 6px 14px 6px 0; border-bottom: 1px solid var(--dark); vertical-align: top; }
+  th { color: var(--dim); font-weight: normal; text-transform: uppercase; font-size: 11px; letter-spacing: 2px; }
+  tr:hover td { background: hsl(var(--h) 40% 10% / .5); }
+  h2 { font-size: 12px; letter-spacing: 3px; text-transform: uppercase; color: var(--dim); margin: 22px 0 8px; }
+  h2::before { content: "▸ "; color: var(--accent); }
+
   pre {
-    background: var(--panel); border: 1px solid var(--dark); border-radius: 6px;
-    padding: 10px; overflow-x: auto; white-space: pre; font-size: 12.5px;
+    background: var(--faint); border: 1px solid var(--dark); border-radius: 8px;
+    padding: 12px; overflow: auto; max-height: 72vh; white-space: pre; font-size: 12.5px;
+    color: var(--text);
   }
   pre .errline { color: var(--err); }
-  .controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 6px 0 10px; }
-  select, button.act, input[type=number] {
-    background: var(--panel); color: var(--green); border: 1px solid var(--dim);
-    border-radius: 4px; font: inherit; padding: 4px 8px;
+  pre .warnline { color: var(--warn); }
+  pre.wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
+  mark { background: var(--accent); color: var(--bg); border-radius: 2px; }
+
+  th.sortable { cursor: pointer; user-select: none; }
+  th.sortable:hover { color: var(--accent); }
+  tr.rowlink { cursor: pointer; }
+  tr.expand td { padding: 0 0 12px; border-bottom: 1px solid var(--dark); }
+  tr.expand pre { margin: 8px 0; max-height: 40vh; }
+  tr.expand .controls { margin: 0; }
+
+  .spark { display: block; width: 100%; height: 26px; margin-top: 8px; }
+  .spark polyline { fill: none; stroke: var(--accent); stroke-width: 2; opacity: .75; }
+  .spark line { stroke: var(--dark); stroke-width: 1; }
+  .trend { vertical-align: middle; }
+  .trend rect { fill: var(--accent); opacity: .8; }
+  #banner.err { color: var(--err); }
+
+  .controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 8px 0 12px; }
+  select, button.act, a.act, input[type=number], input[type=search] {
+    background: var(--faint); color: var(--accent); border: 1px solid var(--dim);
+    border-radius: 6px; font: inherit; padding: 5px 12px; letter-spacing: 1px;
   }
-  button.act { cursor: pointer; } button.act:hover { background: var(--dark); }
+  button.act, a.act { cursor: pointer; text-decoration: none; transition: border-color .15s, box-shadow .15s; }
+  button.act:hover, a.act:hover { background: var(--dark); border-color: var(--accent); box-shadow: var(--glow); }
+  button.act:focus-visible, a.act:focus-visible { outline: 2px solid var(--bright); outline-offset: 2px; }
+  input[type=search]:focus { outline: none; border-color: var(--accent); box-shadow: var(--glow); }
+  button.act:disabled { color: var(--dark); border-color: var(--dark); cursor: default; box-shadow: none; }
+  button.act:disabled:hover { background: var(--faint); }
+  button.danger { color: var(--err); border-color: hsl(0 60% 30%); }
+  button.danger:hover { background: #2b0808; border-color: var(--err); box-shadow: 0 0 10px rgba(255,92,92,.3); }
+  button.danger:disabled { color: var(--dark); border-color: var(--dark); }
   label { color: var(--dim); }
-  details { margin: 4px 0; } summary { cursor: pointer; color: var(--dim); }
+  a.dl { color: var(--dim); } a.dl:hover { color: var(--accent); }
+  details { margin: 6px 0; } summary { cursor: pointer; color: var(--dim); }
+  summary:hover { color: var(--accent); }
   .muted { color: var(--dim); }
   #banner { padding: 6px 20px; color: var(--warn); display: none; border-bottom: 1px solid var(--dark); }
+
+  textarea#cfgedit {
+    display: block; width: 100%; min-height: 62vh; margin-top: 8px; resize: vertical;
+    background: var(--faint); color: var(--text); border: 1px solid var(--dark);
+    border-radius: 8px; padding: 12px; font: inherit; font-size: 12.5px; line-height: 1.5;
+    white-space: pre; overflow: auto; tab-size: 4;
+  }
+  textarea#cfgedit:focus { outline: none; border-color: var(--dim); box-shadow: var(--glow); }
+  textarea#cfgedit[readonly] { color: var(--dim); border-style: dashed; }
+
+  /* boot splash — sits under the fx layers so scanlines play over it */
+  #boot {
+    position: fixed; inset: 0; z-index: 7; background: var(--bg);
+    display: flex; align-items: center; justify-content: center;
+    transition: opacity .45s;
+  }
+  #boot.done { opacity: 0; pointer-events: none; }
+  #boot pre {
+    background: none; border: none; box-shadow: none; max-height: none;
+    font-size: 13.5px; color: var(--accent); text-shadow: 0 0 8px;
+    min-width: min(52ch, 90vw); min-height: 14em;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    header h1::after, .dot.on { animation: none; }
+    * { transition: none !important; }
+  }
 </style>
 </head>
-<body>
+<body class="fx">
+<div id="boot"><pre id="boottext"></pre></div>
 <header>
   <h1>LSMAN // LSI AGENT</h1>
   <span class="meta" id="host">connecting…</span>
   <span class="meta" id="generated"></span>
+  <span class="spacer"></span>
+  <div class="themes" id="themes" title="theme">
+    <button class="swatch" data-h="145" data-s="85%" title="pip green" style="--sw: hsl(145 85% 55%)"></button>
+    <button class="swatch" data-h="40" data-s="100%" title="amber" style="--sw: hsl(40 100% 55%)"></button>
+    <button class="swatch" data-h="198" data-s="95%" title="cool blue" style="--sw: hsl(198 95% 60%)"></button>
+    <button class="swatch" data-h="210" data-s="10%" title="white phosphor" style="--sw: hsl(210 10% 85%)"></button>
+    <button class="swatch" data-h="355" data-s="90%" title="red alert" style="--sw: hsl(355 90% 60%)"></button>
+    <input type="color" id="customcolor" value="#1aff80" title="custom color">
+    <label class="fx-toggle" title="CRT scanlines and glow"><input type="checkbox" id="fxtoggle" checked>fx</label>
+  </div>
 </header>
 <div id="banner"></div>
 <nav>
-  <button data-tab="overview" class="active">Overview</button>
-  <button data-tab="errors">Errors</button>
-  <button data-tab="logs">Logs</button>
-  <button data-tab="network">Network</button>
-  <button data-tab="crashes">Crashes</button>
+  <button data-tab="overview" class="active" title="key 1">Overview</button>
+  <button data-tab="errors" title="key 2">Errors</button>
+  <button data-tab="logs" title="key 3">Logs</button>
+  <button data-tab="config" title="key 4">Config</button>
+  <button data-tab="network" title="key 5">Network</button>
+  <button data-tab="crashes" title="key 6">Crashes</button>
+  <button data-tab="db" title="key 7">Database</button>
 </nav>
 <main>
   <section id="overview" class="active">
     <div class="cards" id="cards"></div>
+    <h2>Daemon control</h2>
+    <div class="controls" id="daemonctl">
+      <button class="act" id="ctl-start">start</button>
+      <button class="act danger" id="ctl-stop">stop</button>
+      <button class="act danger" id="ctl-restart">restart</button>
+      <span class="muted" id="ctlmsg"></span>
+    </div>
+    <h2>Support bundle</h2>
+    <div class="controls">
+      <label>error window</label>
+      <select id="colsince">
+        <option value="1h">last 1h</option>
+        <option value="6h">last 6h</option>
+        <option value="24h" selected>last 24h</option>
+        <option value="7d">last 7d</option>
+        <option value="all">whole logs</option>
+      </select>
+      <a class="act" id="collectdl" href="/api/collect?since=24h">download support bundle (.tar.gz)</a>
+      <span class="muted">report + config + tail-capped logs + crash reports + socket/service state — building can take a moment on big logs</span>
+    </div>
     <h2>Install</h2>
     <table id="install"></table>
     <h2>Logs <span class="muted">(timestamps inside logs are UTC)</span></h2>
@@ -100,9 +254,8 @@
       <button class="act" id="rescan">rescan</button>
       <span class="muted" id="errsummary"></span>
     </div>
-    <div class="muted">grouped by source site — <code>&lt;file&gt;(&lt;line&gt;)</code> points into the agent source; resolve with <code>lsman where "&lt;site&gt;"</code></div>
+    <div class="muted">grouped by source site — <code>&lt;file&gt;(&lt;line&gt;)</code> points into the agent source; click a row for the most recent line, sort by clicking a column header</div>
     <table id="errtable"></table>
-    <div id="errsamples"></div>
   </section>
 
   <section id="logs">
@@ -112,12 +265,41 @@
       <select id="loglines">
         <option>100</option><option selected>200</option><option>500</option><option>1000</option>
       </select>
+      <input type="search" id="logfilter" placeholder="filter lines…" size="18">
       <label><input type="checkbox" id="logerrs"> errors only</label>
+      <label><input type="checkbox" id="logwrap"> wrap</label>
       <label><input type="checkbox" id="logauto" checked> auto-refresh</label>
       <button class="act" id="logreload">reload</button>
+      <a class="act" id="logdl" href="#">download full log</a>
       <span class="muted" id="loginfo"></span>
     </div>
     <pre id="logview">select a log…</pre>
+  </section>
+
+  <section id="config">
+    <div class="controls">
+      <button class="act" id="cfgreload">reload</button>
+      <button class="act" id="cfgsave" disabled>save</button>
+      <span class="muted" id="cfginfo"></span>
+    </div>
+    <div class="controls">
+      <label>quick trace level</label>
+      <select id="tracesel">
+        <option value="0">0 — none</option>
+        <option value="1">1 — errors</option>
+        <option value="2">2 — warnings</option>
+        <option value="3" selected>3 — info (default)</option>
+        <option value="4">4 — trace1</option>
+        <option value="5">5 — trace2</option>
+        <option value="6">6 — trace3</option>
+        <option value="7">7 — trace4</option>
+        <option value="8">8 — trace5</option>
+      </select>
+      <button class="act" id="traceapply" disabled>apply</button>
+      <span class="muted">writes <code>[Debug] LogLevel2</code>; a non-zero local value overrides the master config</span>
+    </div>
+    <div class="muted" id="cfgnote"></div>
+    <textarea id="cfgedit" spellcheck="false" autocomplete="off" wrap="off"></textarea>
   </section>
 
   <section id="network">
@@ -126,7 +308,29 @@
   </section>
 
   <section id="crashes">
+    <div class="muted">click a report to view it inline</div>
     <table id="crashtable"></table>
+    <div class="muted" id="crashinfo"></div>
+    <pre id="crashview" style="display:none"></pre>
+  </section>
+
+  <section id="db">
+    <div class="controls">
+      <input id="dbfindq" type="text" placeholder="search strings (e.g. app name)…" size="28">
+      <button class="act" id="dbfindbtn">find</button>
+      <span class="muted" id="dbfindinfo"></span>
+    </div>
+    <div class="muted">searches the SASTR/SASTRUSER string tables — inventory tables reference strings by ID, so <b>zero matches proves this endpoint has never seen it in any form</b></div>
+    <table id="dbstrings"></table>
+    <div class="controls">
+      <button class="act" id="dbreload">reload tables</button>
+      <span class="muted" id="dbinfo"></span>
+    </div>
+    <div class="muted">read-only (<code>sqlite3 -readonly</code>) against the live agent database — click a table for its newest rows; integer string-IDs are auto-resolved to their SASTR/SASTRUSER values; the Overview tab's download serves a consistent <code>.backup</code> snapshot</div>
+    <table id="dbtables"></table>
+    <h2 id="dbrowshdr" style="display:none"></h2>
+    <div class="muted" id="dbrowsnote"></div>
+    <div style="overflow:auto"><table id="dbrows"></table></div>
   </section>
 </main>
 
@@ -135,16 +339,78 @@
 const $ = id => document.getElementById(id);
 let snap = null;
 let activeTab = "overview";
+let cfgText = null; // config as of last load/save; null until first load
+let errScan = null; // last /api/errors result; null until first scan
+let errSort = { key: "count", dir: -1 };
+const errOpen = new Set(); // "<log>|<site>" keys of expanded error rows
+let logLines = []; // last /api/log tail, pre-filter
+let logSizeInfo = "";
+let logOffset = null; // byte offset for incremental follow; null until first full tail
+let dbTables = null; // last /api/db/tables result; null until first load
+let lastFaviconState = null;
+let connLost = false;
+// cpu/mem samples from snapshot polling, oldest first (client-side only)
+const hist = { cpu: [], mem: [] };
+const HIST_MAX = 100; // ×3s poll ≈ last 5 minutes
 
+// --- theme -----------------------------------------------------------------
+const THEME_KEY = "lsman-theme";
+let theme = { h: 145, s: "85%", fx: true };
+try { theme = { ...theme, ...JSON.parse(localStorage.getItem(THEME_KEY) || "{}") }; } catch (e) {}
+
+function applyTheme(t) {
+  document.documentElement.style.setProperty("--h", t.h);
+  document.documentElement.style.setProperty("--s", t.s);
+  document.body.classList.toggle("fx", t.fx !== false);
+  $("fxtoggle").checked = t.fx !== false;
+  document.querySelectorAll(".swatch").forEach(b =>
+    b.classList.toggle("active", b.dataset.h == t.h && b.dataset.s == t.s));
+  localStorage.setItem(THEME_KEY, JSON.stringify(t));
+}
+applyTheme(theme);
+document.querySelectorAll(".swatch").forEach(b => {
+  b.onclick = () => applyTheme(theme = { ...theme, h: +b.dataset.h, s: b.dataset.s });
+});
+$("customcolor").oninput = e => {
+  const [h, s] = hexToHS(e.target.value);
+  applyTheme(theme = { ...theme, h, s: s + "%" });
+};
+$("fxtoggle").onchange = e => applyTheme(theme = { ...theme, fx: e.target.checked });
+
+// hue/saturation from a #rrggbb picker value (lightness stays theme-managed
+// so contrast survives whatever color is picked)
+function hexToHS(hex) {
+  const r = parseInt(hex.slice(1, 3), 16) / 255,
+        g = parseInt(hex.slice(3, 5), 16) / 255,
+        b = parseInt(hex.slice(5, 7), 16) / 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+  let h = 0;
+  if (d) h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  h = Math.round(h * 60); if (h < 0) h += 360;
+  const l = (mx + mn) / 2;
+  const s = d ? d / (1 - Math.abs(2 * l - 1)) : 0;
+  return [h, Math.round(Math.min(1, s) * 100)];
+}
+
+// --- tabs --------------------------------------------------------------------
 document.querySelectorAll("nav button").forEach(btn => {
   btn.onclick = () => {
     activeTab = btn.dataset.tab;
     document.querySelectorAll("nav button").forEach(b => b.classList.toggle("active", b === btn));
     document.querySelectorAll("main section").forEach(s => s.classList.toggle("active", s.id === activeTab));
     if (activeTab === "logs") loadLog();
-    if (activeTab === "errors" && !$("errtable").innerHTML) scanErrors();
+    if (activeTab === "errors" && !errScan) scanErrors();
+    if (activeTab === "config") { if (cfgText === null) loadConfig(); else updateCfgState(); }
+    if (activeTab === "db" && !dbTables) loadDbTables();
+    history.replaceState(null, "", "#" + activeTab);
   };
 });
+// deep link: /#logs, /#config, …
+{
+  const initTab = location.hash.slice(1);
+  const btn = document.querySelector(`nav button[data-tab="${CSS.escape(initTab)}"]`);
+  if (btn && initTab !== "overview") btn.click();
+}
 
 const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const fmtBytes = b => b < 1024 ? b + " B" : b < 1048576 ? (b/1024).toFixed(1) + " KB"
@@ -155,32 +421,123 @@ const fmtDur = s => s < 3600 ? Math.floor(s/60) + "m" : s < 86400 ? Math.floor(s
   : Math.floor(s/86400) + "d " + Math.floor(s%86400/3600) + "h";
 
 async function refreshSnapshot() {
+  const banner = $("banner");
   try {
     const r = await fetch("/api/snapshot");
     snap = await r.json();
   } catch (e) {
-    $("host").textContent = "connection lost — is lsman serve still running?";
+    connLost = true;
+    $("host").textContent = "connection lost";
+    banner.style.display = "block";
+    banner.className = "err";
+    banner.textContent = "connection to lsman lost — is `lsman serve` still running? retrying every 3s…";
+    setFavicon(null);
     return;
   }
+  connLost = false;
+  banner.className = "";
   $("host").textContent = snap.hostname + " (" + snap.platform + ")";
   $("generated").textContent = snap.generated_utc;
-  const banner = $("banner");
+  const d = snap.daemon;
+  setFavicon(d.state === "Running");
+  if (d.pid && d.stats_available) {
+    hist.cpu.push(d.cpu_percent);
+    hist.mem.push(d.memory_kb);
+    if (hist.cpu.length > HIST_MAX) { hist.cpu.shift(); hist.mem.shift(); }
+  }
   if (!snap.running_as_root) {
     banner.style.display = "block";
-    banner.textContent = "not running as root — daemon stats, sockets and some logs are unavailable; restart with: sudo lsman serve";
+    banner.textContent = "not running as root — daemon control/stats, sockets and some logs are unavailable; restart with: sudo lsman serve";
   } else banner.style.display = "none";
-  renderOverview(); renderNetwork(); renderCrashes();
+  renderOverview(); renderNetwork(); renderCrashes(); updateCfgState();
 }
 
-function card(k, v, cls) { return `<div class="card"><div class="k">${k}</div><div class="v ${cls||""}">${v}</div></div>`; }
+// favicon + tab title mirror daemon state: ● running / ○ stopped / ◌ lost
+function setFavicon(running) {
+  if (running === lastFaviconState) return;
+  lastFaviconState = running;
+  const c = document.createElement("canvas");
+  c.width = c.height = 16;
+  const x = c.getContext("2d");
+  x.beginPath();
+  x.arc(8, 8, 6, 0, 7);
+  x.fillStyle = running === null ? "#888" : running ? "#27c46f" : "#ff5c5c";
+  x.fill();
+  let link = document.querySelector("link[rel=icon]");
+  if (!link) {
+    link = document.createElement("link");
+    link.rel = "icon";
+    document.head.appendChild(link);
+  }
+  link.href = c.toDataURL("image/png");
+  document.title = (running === null ? "◌" : running ? "●" : "○") + " lsman — LSI agent";
+}
+
+function card(k, v, cls, extra) { return `<div class="card"><div class="k">${k}</div><div class="v ${cls||""}">${v}</div>${extra||""}</div>`; }
+
+// Single-series sparkline over the poll history: fixed step per sample so the
+// line grows left→right until the buffer fills, then scrolls.
+function spark(vals, label, fmt) {
+  if (vals.length < 2) return "";
+  const w = 120, h = 26, step = w / (HIST_MAX - 1);
+  const max = Math.max(...vals, 1e-9);
+  const pts = vals.map((v, i) => (i * step).toFixed(1) + "," + (h - 2 - (v / max) * (h - 4)).toFixed(1)).join(" ");
+  const f = fmt || (x => x);
+  const secs = vals.length * 3;
+  const span = secs < 120 ? secs + "s" : Math.round(secs / 60) + "m";
+  return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">`
+    + `<title>${label} over the last ${span} — min ${f(Math.min(...vals))}, max ${f(max)}</title>`
+    + `<line x1="0" y1="${h - 1}" x2="${w}" y2="${h - 1}"/><polyline points="${pts}"/></svg>`;
+}
+const dlink = key => `<a class="dl" href="/api/download?file=${encodeURIComponent(key)}" title="download a copy">download</a>`;
+
+let ctlBusy = false;
+async function daemonAction(action) {
+  const confirms = {
+    stop: "Stop the agent daemon? The launchd/systemd job is unloaded until started again.",
+    restart: "Restart the agent daemon?",
+  };
+  if (confirms[action] && !confirm(confirms[action])) return;
+  ctlBusy = true;
+  const msg = $("ctlmsg");
+  msg.className = "muted";
+  msg.textContent = { start: "starting…", stop: "stopping…", restart: "restarting…" }[action];
+  document.querySelectorAll("#daemonctl button").forEach(b => b.disabled = true);
+  try {
+    const r = await fetch("/api/daemon/" + action, { method: "POST", headers: { "X-Lsman-Control": "1" } });
+    const res = await r.json();
+    msg.textContent = res.ok ? action + " ok — daemon " + res.state : (res.error || action + " failed");
+    msg.className = res.ok ? "muted" : "err";
+  } catch (e) {
+    msg.textContent = "request failed: " + e;
+    msg.className = "err";
+  }
+  ctlBusy = false;
+  refreshSnapshot();
+}
+$("ctl-start").onclick = () => daemonAction("start");
+$("ctl-stop").onclick = () => daemonAction("stop");
+$("ctl-restart").onclick = () => daemonAction("restart");
+$("colsince").onchange = () => {
+  $("collectdl").href = "/api/collect?since=" + encodeURIComponent($("colsince").value);
+};
 
 function renderOverview() {
   const d = snap.daemon;
-  const stateCls = d.state === "Running" ? "ok" : "err";
-  let cards = card("daemon", esc(d.state) + (d.pid ? ` <span class="muted">pid ${d.pid}</span>` : ""), stateCls);
+  const running = d.state === "Running";
+  const stateCls = running ? "ok" : "err";
+  if (!ctlBusy) {
+    $("ctl-start").disabled = running;
+    $("ctl-stop").disabled = !running;
+    $("ctl-restart").disabled = !running;
+  }
+  let cards = card("daemon",
+    `<span class="dot ${running ? "on" : "off"}"></span>` + esc(d.state) + (d.pid ? ` <span class="muted">pid ${d.pid}</span>` : ""), stateCls);
   if (d.pid && d.stats_available) {
-    cards += card("cpu", d.cpu_percent.toFixed(1) + "%");
-    cards += card("memory", fmtBytes(d.memory_kb * 1024));
+    cards += card("cpu", d.cpu_percent.toFixed(1) + "%", "",
+      spark(hist.cpu, "cpu", x => x.toFixed(1) + "%"));
+    cards += card("memory", fmtBytes(d.memory_kb * 1024), "",
+      spark(hist.mem, "memory", x => fmtBytes(x * 1024)));
     cards += card("uptime", d.uptime_seconds ? fmtDur(d.uptime_seconds) : "unknown");
     cards += card("open files", d.open_files);
   } else if (d.pid) {
@@ -199,12 +556,13 @@ function renderOverview() {
   cards += card("crash reports", snap.crashes.length, snap.crashes.length ? "err" : "ok");
   $("cards").innerHTML = cards;
 
-  const rows = [["binary", snap.binary], ["base dir", snap.base_dir], ["config", cfg.file], ["database", snap.database]]
-    .map(([k, f]) => `<tr><td class="muted">${k}</td><td>${esc(f.path)}</td><td>${f.exists ? (f.is_dir ? "dir" : fmtBytes(f.size_bytes)) : '<span class="err">missing</span>'}</td><td>${f.exists ? fmtAgo(f.modified_secs_ago) : ""}</td></tr>`);
-  $("install").innerHTML = "<tr><th></th><th>path</th><th>size</th><th>modified</th></tr>" + rows.join("");
+  const rows = [["binary", snap.binary, null], ["base dir", snap.base_dir, null],
+    ["config", cfg.file, "cfg"], ["database", snap.database, "db"], ["profile", snap.profile, "profile"]]
+    .map(([k, f, key]) => `<tr><td class="muted">${k}</td><td>${esc(f.path)}</td><td>${f.exists ? (f.is_dir ? "dir" : fmtBytes(f.size_bytes)) : '<span class="err">missing</span>'}</td><td>${f.exists ? fmtAgo(f.modified_secs_ago) : ""}</td><td>${key && f.exists && !f.is_dir ? dlink(key) : ""}</td></tr>`);
+  $("install").innerHTML = "<tr><th></th><th>path</th><th>size</th><th>modified</th><th></th></tr>" + rows.join("");
 
-  $("logfresh").innerHTML = "<tr><th>log</th><th>size</th><th>last written</th><th></th></tr>" +
-    snap.logs.map(l => `<tr><td>${esc(l.name)}</td><td>${l.file.exists ? fmtBytes(l.file.size_bytes) : '<span class="muted">missing</span>'}</td><td>${l.file.exists ? fmtAgo(l.file.modified_secs_ago) : ""}</td><td class="muted">${esc(l.description)}</td></tr>`).join("");
+  $("logfresh").innerHTML = "<tr><th>log</th><th>size</th><th>last written</th><th></th><th></th></tr>" +
+    snap.logs.map(l => `<tr><td>${esc(l.name)}</td><td>${l.file.exists ? fmtBytes(l.file.size_bytes) : '<span class="muted">missing</span>'}</td><td>${l.file.exists ? fmtAgo(l.file.modified_secs_ago) : ""}</td><td>${l.file.exists ? dlink("log:" + l.name) : ""}</td><td class="muted">${esc(l.description)}</td></tr>`).join("");
 
   const sel = $("logname");
   const cur = sel.value;
@@ -219,58 +577,396 @@ function renderNetwork() {
     $("netnote").textContent = up.error || "socket data unavailable — run with sudo";
     return;
   }
-  $("netnote").textContent = up.total_sockets + " open sockets; established connections shown (uplink to master)";
-  $("nettable").innerHTML = "<tr><th>local</th><th>remote</th><th>state</th></tr>" +
-    up.established.map(c => `<tr><td>${esc(c.local)}</td><td>${esc(c.remote)}</td><td class="ok">ESTABLISHED</td></tr>`).join("");
+  $("netnote").textContent = up.total_sockets + " open sockets — an ESTABLISHED TCP connection is the uplink to the master";
+  const stateCls = s => s === "ESTABLISHED" ? "ok" : s === "LISTEN" ? "muted" : "warn";
+  $("nettable").innerHTML = "<tr><th>proto</th><th>local</th><th>remote</th><th>state</th></tr>" +
+    (up.sockets || []).map(c =>
+      `<tr><td>${esc(c.protocol)}</td><td>${esc(c.local)}</td><td>${esc(c.remote || "-")}</td><td class="${c.state ? stateCls(c.state) : "muted"}">${esc(c.state || "-")}</td></tr>`).join("");
 }
 
 function renderCrashes() {
   $("crashtable").innerHTML = "<tr><th>modified</th><th>report</th></tr>" +
     (snap.crashes.length
-      ? snap.crashes.map(c => `<tr><td>${esc(c.modified)}</td><td>${esc(c.path)}</td></tr>`).join("")
+      ? snap.crashes.map(c => `<tr class="rowlink" data-name="${esc(c.path.split("/").pop())}"><td>${esc(c.modified)}</td><td>${esc(c.path)}</td></tr>`).join("")
       : '<tr><td colspan="2" class="muted">none found' + (snap.running_as_root ? "" : " (daemon reports may need sudo)") + "</td></tr>");
 }
+
+$("crashtable").onclick = async e => {
+  const row = e.target.closest("tr.rowlink");
+  if (!row) return;
+  $("crashinfo").textContent = "loading " + row.dataset.name + "…";
+  try {
+    const r = await fetch("/api/crash?name=" + encodeURIComponent(row.dataset.name));
+    const data = await r.json();
+    if (data.error) { $("crashinfo").textContent = data.error; $("crashview").style.display = "none"; return; }
+    $("crashinfo").textContent = data.path + " — " + fmtBytes(data.size_bytes)
+      + (data.truncated ? " (showing first 512 KB)" : "");
+    $("crashview").textContent = data.content;
+    $("crashview").style.display = "block";
+  } catch (err) {
+    $("crashinfo").textContent = "request failed: " + err;
+  }
+};
 
 async function scanErrors() {
   $("errsummary").textContent = "scanning…";
   const r = await fetch("/api/errors?since=" + $("since").value);
-  const scan = await r.json();
-  $("errsummary").textContent = scan.total_matches + " matching lines / " + scan.groups.length + " sites"
-    + (scan.unreadable_logs.length ? " — unreadable: " + scan.unreadable_logs.join(", ") : "");
-  $("errtable").innerHTML = scan.groups.length
-    ? "<tr><th>log</th><th>site</th><th>count</th><th>first seen</th><th>last seen</th></tr>" +
-      scan.groups.map(g => `<tr><td>${esc(g.log)}</td><td>${esc(g.site)}</td><td>${g.count}</td><td>${esc(g.first_seen||"-")}</td><td>${esc(g.last_seen||"-")}</td></tr>`).join("")
-    : '<tr><td class="muted">no error/crash lines in this window</td></tr>';
-  $("errsamples").innerHTML = scan.groups.map(g =>
-    `<details><summary>${esc(g.site)} — most recent line</summary><pre>${esc(g.sample)}</pre></details>`).join("");
+  errScan = await r.json();
+  $("errsummary").textContent = errScan.total_matches + " matching lines / " + errScan.groups.length + " sites"
+    + (errScan.unreadable_logs.length ? " — unreadable: " + errScan.unreadable_logs.join(", ") : "");
+  renderErrors();
 }
+
+// A group's hits bucketed across the scan window, as tiny baseline-anchored
+// bars (empty for unwindowed "whole logs" scans).
+function trendBars(g) {
+  const b = g.buckets;
+  if (!b || !b.length || !b.some(v => v)) return '<span class="muted">—</span>';
+  const max = Math.max(...b);
+  const bw = 3, gap = 1, h = 16;
+  const w = b.length * (bw + gap) - gap;
+  const rects = b.map((v, i) => v
+    ? `<rect x="${i * (bw + gap)}" y="${(h - Math.max(1, Math.round(v / max * (h - 1)))).toFixed(0)}" width="${bw}" height="${Math.max(1, Math.round(v / max * (h - 1)))}"/>`
+    : "").join("");
+  return `<svg class="trend" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}">`
+    + `<title>hits across the ${esc(errScan.since || "")} window, oldest → newest; peak ${max} per slice</title>${rects}</svg>`;
+}
+
+function renderErrors() {
+  if (!errScan) return;
+  const cols = [["log", "log"], ["site", "site"], ["count", "count"], ["first_seen", "first seen"], ["last_seen", "last seen"]];
+  const head = "<tr>" + cols.map(([key, label]) =>
+    `<th class="sortable" data-key="${key}">${label}${errSort.key === key ? (errSort.dir < 0 ? " ▾" : " ▴") : ""}</th>`).join("") + "<th>trend</th></tr>";
+  const groups = [...errScan.groups].sort((a, b) => {
+    const [x, y] = [a[errSort.key], b[errSort.key]];
+    return errSort.dir * (typeof x === "number" ? x - y : String(x ?? "").localeCompare(String(y ?? "")));
+  });
+  $("errtable").innerHTML = head + (groups.length
+    ? groups.map(g => {
+        const key = g.log + "|" + g.site;
+        const row = `<tr class="rowlink" data-key="${esc(key)}"><td>${esc(g.log)}</td><td>${esc(g.site)}</td><td>${g.count}</td><td>${esc(g.first_seen||"-")}</td><td>${esc(g.last_seen||"-")}</td><td>${trendBars(g)}</td></tr>`;
+        return errOpen.has(key)
+          ? row + `<tr class="expand"><td colspan="6"><pre>${esc(g.sample)}</pre><div class="controls"><button class="act" data-jump-log="${esc(g.log)}" data-jump-site="${esc(g.site)}">view in log</button><button class="act" data-where="${esc(g.site)}">copy: lsman where "${esc(g.site)}"</button></div></td></tr>`
+          : row;
+      }).join("")
+    : '<tr><td colspan="6" class="muted">no error/crash lines in this window</td></tr>');
+}
+
+$("errtable").onclick = async e => {
+  const jump = e.target.closest("button[data-jump-log]");
+  if (jump) {
+    // switch to the Logs tab pre-filtered to this site (the site string is a
+    // plain substring of its log lines, truncated forms included)
+    $("logname").value = jump.dataset.jumpLog;
+    $("loglines").value = "1000";
+    $("logerrs").checked = false;
+    $("logfilter").value = jump.dataset.jumpSite;
+    document.querySelector('nav button[data-tab="logs"]').click();
+    return;
+  }
+  const where = e.target.closest("button[data-where]");
+  if (where) {
+    try {
+      await navigator.clipboard.writeText(`lsman where "${where.dataset.where}"`);
+      where.textContent = "copied — run it in a terminal to resolve the source file";
+    } catch (_) { where.textContent = "copy failed — select the command from the button label"; }
+    return;
+  }
+  const th = e.target.closest("th.sortable");
+  if (th) {
+    errSort = { key: th.dataset.key, dir: errSort.key === th.dataset.key ? -errSort.dir : -1 };
+    renderErrors();
+    return;
+  }
+  const row = e.target.closest("tr.rowlink");
+  if (row) {
+    errOpen.has(row.dataset.key) ? errOpen.delete(row.dataset.key) : errOpen.add(row.dataset.key);
+    renderErrors();
+  }
+};
 $("rescan").onclick = scanErrors;
 $("since").onchange = scanErrors;
 
 async function loadLog() {
   const name = $("logname").value;
   if (!name) return;
+  $("logdl").href = "/api/download?file=" + encodeURIComponent("log:" + name);
   const url = `/api/log?name=${encodeURIComponent(name)}&n=${$("loglines").value}&errors=${$("logerrs").checked ? 1 : 0}`;
   const r = await fetch(url);
   const data = await r.json();
+  if (data.error) { $("logview").textContent = data.error; $("loginfo").textContent = ""; logOffset = null; return; }
+  logLines = data.lines;
+  logOffset = data.next_offset;
+  logSizeInfo = fmtBytes(data.size_bytes) + (data.windowed ? " (showing last 1 MB window)" : "");
+  renderLog();
+}
+
+// Auto-refresh path: fetch only bytes appended since the last poll and append
+// the complete new lines, instead of re-reading the whole tail every 3s.
+async function pollLog() {
+  const name = $("logname").value;
+  if (!name) return;
+  if (logOffset === null) return loadLog();
+  const url = `/api/log?name=${encodeURIComponent(name)}&offset=${logOffset}&errors=${$("logerrs").checked ? 1 : 0}`;
+  let data;
+  try {
+    data = await (await fetch(url)).json();
+  } catch (e) { return; }
+  if (data.error) return;
+  if (data.reset) return loadLog(); // rotated/truncated or a huge burst
+  logOffset = data.next_offset;
+  logSizeInfo = fmtBytes(data.size_bytes) + " (following)";
+  if (data.lines.length) {
+    logLines.push(...data.lines);
+    if (logLines.length > 2000) logLines.splice(0, logLines.length - 2000);
+  }
+  renderLog();
+}
+
+// Escape while wrapping case-insensitive matches of `q` in <mark> — matching on
+// the raw line, before escaping, so entities can't produce false hits.
+function highlight(line, q) {
+  if (!q) return esc(line);
+  const lo = line.toLowerCase();
+  const out = [];
+  let i = 0, j;
+  while ((j = lo.indexOf(q, i)) !== -1) {
+    out.push(esc(line.slice(i, j)), "<mark>" + esc(line.slice(j, j + q.length)) + "</mark>");
+    i = j + q.length;
+  }
+  out.push(esc(line.slice(i)));
+  return out.join("");
+}
+
+function renderLog() {
   const view = $("logview");
-  if (data.error) { view.textContent = data.error; $("loginfo").textContent = ""; return; }
-  $("loginfo").textContent = fmtBytes(data.size_bytes) + (data.windowed ? " (showing last 1 MB window)" : "");
+  const q = $("logfilter").value.trim().toLowerCase();
+  const lines = q ? logLines.filter(l => l.toLowerCase().includes(q)) : logLines;
+  $("loginfo").textContent = (q ? lines.length + " of " + logLines.length + " lines — " : "") + logSizeInfo;
   const stick = view.scrollTop + view.clientHeight >= view.scrollHeight - 8;
-  view.innerHTML = data.lines.map(l =>
-    l.includes(" -E ") ? `<span class="errline">${esc(l)}</span>` : esc(l)).join("\n") || "(empty)";
+  view.classList.toggle("wrap", $("logwrap").checked);
+  view.innerHTML = lines.map(l => {
+    const h = highlight(l, q);
+    return l.includes(" -E ") ? `<span class="errline">${h}</span>`
+      : l.includes(" -W ") ? `<span class="warnline">${h}</span>` : h;
+  }).join("\n") || (logLines.length ? "(no lines match the filter)" : "(empty)");
   if (stick) view.scrollTop = view.scrollHeight;
 }
 $("logreload").onclick = loadLog;
 $("logname").onchange = loadLog;
 $("loglines").onchange = loadLog;
 $("logerrs").onchange = loadLog;
+$("logfilter").oninput = () => renderLog();
+$("logwrap").onchange = () => renderLog();
+
+// --- config editor -----------------------------------------------------------
+async function loadConfig() {
+  $("cfginfo").textContent = "loading…";
+  try {
+    const r = await fetch("/api/config");
+    const data = await r.json();
+    if (data.error) { $("cfginfo").textContent = ""; cfgNote(data.error, "err"); return; }
+    cfgText = data.content;
+    $("cfgedit").value = data.content;
+    $("cfginfo").textContent = data.path + (data.exists ? "" : " (missing — will be created on save)");
+    updateCfgState();
+  } catch (e) {
+    $("cfginfo").textContent = ""; cfgNote("request failed: " + e, "err");
+  }
+}
+
+function cfgNote(text, cls) { const n = $("cfgnote"); n.textContent = text; n.className = cls; }
+
+function updateCfgState() {
+  if (cfgText === null) return;
+  const running = !snap || snap.daemon.state === "Running";
+  const dirty = $("cfgedit").value !== cfgText;
+  $("cfgedit").readOnly = running;
+  $("cfgsave").disabled = running || !dirty;
+  $("traceapply").disabled = running;
+  if (snap && document.activeElement !== $("tracesel")) {
+    $("tracesel").value = String(snap.config.trace_level ?? 3);
+  }
+  if (running) cfgNote("agent is running — stop it (Overview → daemon control) to edit; the daemon only reads lsiagent.cfg at startup", "warn");
+  else cfgNote(dirty ? "unsaved changes" : "editable — agent is stopped", "muted");
+}
+$("cfgedit").oninput = updateCfgState;
+$("cfgreload").onclick = () => {
+  if (cfgText !== null && $("cfgedit").value !== cfgText && !confirm("Discard unsaved changes and reload?")) return;
+  loadConfig();
+};
+
+$("cfgsave").onclick = async () => {
+  if (!confirm("Write lsiagent.cfg? A bad config can keep the agent from starting.")) return;
+  $("cfgsave").disabled = true;
+  try {
+    const r = await fetch("/api/config", {
+      method: "POST",
+      headers: { "X-Lsman-Control": "1" },
+      body: $("cfgedit").value,
+    });
+    const res = await r.json();
+    if (res.ok) {
+      cfgText = $("cfgedit").value;
+      cfgNote("saved — " + res.bytes_written + " bytes written"
+        + (res.trace_level != null ? " (trace level " + res.trace_level + ")" : ""), "muted");
+      $("cfgsave").disabled = true;
+      refreshSnapshot();
+    } else {
+      cfgNote(res.error || "save failed", "err");
+      $("cfgsave").disabled = false;
+    }
+  } catch (e) {
+    cfgNote("request failed: " + e, "err");
+    $("cfgsave").disabled = false;
+  }
+};
+
+// keys 1–6 switch tabs (unless typing in a field)
+addEventListener("keydown", e => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.target.matches("input, textarea, select")) return;
+  const tabs = document.querySelectorAll("nav button");
+  const n = +e.key;
+  if (n >= 1 && n <= tabs.length) tabs[n - 1].click();
+});
+
+// --- database inspector --------------------------------------------------------
+async function loadDbTables() {
+  $("dbinfo").textContent = "loading…";
+  try {
+    const r = await fetch("/api/db/tables");
+    const data = await r.json();
+    if (data.error) { $("dbinfo").textContent = data.error; return; }
+    dbTables = data.tables;
+    $("dbinfo").textContent = dbTables.length + " tables";
+    $("dbtables").innerHTML = "<tr><th>table</th><th>rows</th></tr>" +
+      dbTables.map(t => `<tr class="rowlink" data-table="${esc(t.name)}"><td>${esc(t.name)}</td><td>${t.n}</td></tr>`).join("");
+  } catch (e) {
+    $("dbinfo").textContent = "request failed: " + e;
+  }
+}
+$("dbreload").onclick = loadDbTables;
+
+const cell = v => v == null ? '<span class="muted">null</span>' : esc(String(v).length > 200 ? String(v).slice(0, 200) + "…" : v);
+// String-ID cell: show the resolved SASTR/SASTRUSER value with the raw id
+// dimmed beside it; anything unresolved falls through to the plain cell.
+const dbCell = (v, map) => (map && v != null && map[v] !== undefined)
+  ? `${cell(map[v])} <span class="muted">#${v}</span>` : cell(v);
+
+$("dbtables").onclick = async e => {
+  const row = e.target.closest("tr.rowlink");
+  if (!row) return;
+  const name = row.dataset.table;
+  $("dbrowsnote").textContent = "loading " + name + "…";
+  try {
+    const r = await fetch("/api/db/table?name=" + encodeURIComponent(name));
+    const data = await r.json();
+    if (data.error) { $("dbrowsnote").textContent = data.error; return; }
+    $("dbrowshdr").style.display = "";
+    $("dbrowshdr").textContent = name;
+    if (!data.rows.length) { $("dbrowsnote").textContent = "empty table"; $("dbrows").innerHTML = ""; return; }
+    const cols = Object.keys(data.rows[0]);
+    const res = data.resolved || {};
+    const anyResolved = Object.keys(res).length > 0;
+    $("dbrowsnote").textContent = data.rows.length + " rows shown (newest first, max 50; long values clipped" +
+      (anyResolved ? "; * = string-IDs resolved via SASTR/SASTRUSER" : "") + ")";
+    $("dbrows").innerHTML = "<tr>" + cols.map(c =>
+      `<th title="${res[c] ? "string-IDs resolved via SASTR/SASTRUSER" : ""}">${esc(c)}${res[c] ? "*" : ""}</th>`).join("") + "</tr>" +
+      data.rows.map(r0 => "<tr>" + cols.map(c => `<td>${dbCell(r0[c], res[c])}</td>`).join("") + "</tr>").join("");
+  } catch (err) {
+    $("dbrowsnote").textContent = "request failed: " + err;
+  }
+};
+
+// --- string search ("has this endpoint ever seen X?") ---------------------------
+async function dbFindStrings() {
+  const q = $("dbfindq").value.trim();
+  if (q.length < 2) { $("dbfindinfo").textContent = "need at least 2 characters"; return; }
+  $("dbfindinfo").textContent = "searching…";
+  try {
+    const r = await fetch("/api/db/strings?q=" + encodeURIComponent(q));
+    const data = await r.json();
+    if (data.error) { $("dbfindinfo").textContent = data.error; return; }
+    if (!data.rows.length) {
+      $("dbfindinfo").textContent = `no matches — this endpoint has never seen "${q}" in any form`;
+      $("dbstrings").innerHTML = "";
+      return;
+    }
+    $("dbfindinfo").textContent = data.rows.length + " match" + (data.rows.length === 1 ? "" : "es") +
+      (data.rows.length >= data.limit ? " (capped — narrow the pattern)" : "");
+    $("dbstrings").innerHTML = "<tr><th>scope</th><th>string-id</th><th>value</th></tr>" +
+      data.rows.map(s => `<tr><td>${esc(s.scope)}</td><td>${s.STRINGID}</td><td>${cell(s.STRVALUE)}</td></tr>`).join("");
+  } catch (e) {
+    $("dbfindinfo").textContent = "request failed: " + e;
+  }
+}
+$("dbfindbtn").onclick = dbFindStrings;
+$("dbfindq").addEventListener("keydown", e => { if (e.key === "Enter") dbFindStrings(); });
+
+// --- quick trace level ----------------------------------------------------------
+$("traceapply").onclick = async () => {
+  const level = $("tracesel").value;
+  if (!confirm(`Set [Debug] LogLevel2 = ${level} in lsiagent.cfg?`)) return;
+  try {
+    const r = await fetch("/api/config/trace?level=" + level, {
+      method: "POST",
+      headers: { "X-Lsman-Control": "1" },
+    });
+    const res = await r.json();
+    if (res.ok) {
+      cfgNote("trace level set to " + res.trace_level + " — start the agent to apply it", "muted");
+      loadConfig();
+      refreshSnapshot();
+    } else cfgNote(res.error || "trace level change failed", "err");
+  } catch (e) {
+    cfgNote("request failed: " + e, "err");
+  }
+};
 
 refreshSnapshot();
 setInterval(() => {
-  if (activeTab === "overview" || activeTab === "network" || activeTab === "crashes") refreshSnapshot();
-  if (activeTab === "logs" && $("logauto").checked) loadLog();
+  if (["overview", "network", "crashes", "config"].includes(activeTab)) refreshSnapshot();
+  if (activeTab === "logs" && $("logauto").checked) pollLog();
 }, 3000);
+
+// --- boot splash ---------------------------------------------------------------
+// Plays once per browser session; click or any key skips it.
+(function bootAnimation() {
+  const el = $("boot");
+  const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let seen = false;
+  try { seen = !!sessionStorage.getItem("lsman-booted"); sessionStorage.setItem("lsman-booted", "1"); } catch (e) {}
+  if (reduced || seen) { el.remove(); return; }
+  const text = [
+    "*********** LSMAN(R) TERMLINK PROTOCOL ***********",
+    "",
+    "INITIALIZING LSI AGENT INTERFACE",
+    "",
+    "> SCANNING AGENT INSTALL .............. OK",
+    "> ATTACHING LOG STREAMS ............... OK",
+    "> QUERYING DAEMON STATE ............... OK",
+    "> CALIBRATING PHOSPHOR DISPLAY ........ OK",
+    "",
+    "WELCOME, OPERATOR",
+  ].join("\n");
+  const pre = $("boottext");
+  let i = 0, t;
+  const finish = () => {
+    clearTimeout(t);
+    el.classList.add("done");
+    setTimeout(() => el.remove(), 500);
+  };
+  const step = () => {
+    i++;
+    pre.textContent = text.slice(0, i) + (i < text.length ? "▮" : "");
+    if (i < text.length) t = setTimeout(step, text[i - 1] === "\n" ? 50 : 7);
+    else t = setTimeout(finish, 600);
+  };
+  step();
+  el.addEventListener("click", finish);
+  addEventListener("keydown", finish, { once: true });
+})();
 </script>
 </body>
 </html>
